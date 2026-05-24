@@ -1,9 +1,9 @@
 {
   "_meta": {
-    "version": "1.8.157",
-    "updated_at": "2026-05-24T17:00:19.311353+00:00",
+    "version": "1.8.154",
+    "updated_at": "2026-05-24",
     "description": "保险产品库整理版，保留在售及有效产品",
-    "total_products": 2617,
+    "total_products": 2553,
     "active_products": 589,
     "dedup_applied": true,
     "verified_count": 45,
@@ -59,7 +59,7 @@
       "终身寿险": 40,
       "待分类": 18
     },
-    "active_count": 653,
+    "active_count": 589,
     "type_stats": {
       "重疾险": 641,
       "医疗险": 356,
