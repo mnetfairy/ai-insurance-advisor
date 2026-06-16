@@ -1,7 +1,7 @@
 ---
 name: ai-insurance-advisor
 description: 中国大陆保险AI助手。当用户询问以下内容时使用：保险配置、保险方案、产品对比、重疾险/医疗险/寿险/意外险/储蓄险推荐、保费计算、保障缺口分析、需求分析、核保合规、理赔、朋友圈文案、培训话术、代理人展业支持。
-version: 1.8.241
+version: 1.8.243
 tags: insurance, china, financial, advisor, product-comparison, medical, family-protection, health
 ---
 
