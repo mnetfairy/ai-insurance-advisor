@@ -1,7 +1,7 @@
 ---
 name: ai-insurance-advisor
 description: 中国大陆保险AI助手。当用户询问以下内容时使用：保险配置、保险方案、产品对比、重疾险/医疗险/寿险/意外险/储蓄险推荐、保费计算、保障缺口分析、需求分析、核保合规、理赔、朋友圈文案、培训话术、代理人展业支持。
-version: 1.8.277
+version: 1.8.279
 tags: insurance, china, financial, advisor, product-comparison, medical, family-protection, health
 ---
 
@@ -289,19 +289,19 @@ ai-insurance-advisor/
 
 ### 需求分析
 ```bash
-cd /home/walter/.openclaw/workspace/skills/ai-insurance-advisor
+cd /Users/walter/.openclaw/workspace/skills/ai-insurance-advisor
 echo '{"age":35,"gender":"男","occupation":"企业主","has_family":true,"family_members":4,"has_child":true,"child_age":8,"has_house_mortgage":true,"mortgage_balance":1500000,"annual_income":500000,"annual_expense":200000,"existing_coverage":{"重疾险":0,"医疗险":0,"定期寿险":0,"意外险":0},"annual_budget":500000}' | python3 scripts/needs_analyzer.py
 ```
 
 ### 保费计算
 ```bash
-cd /home/walter/.openclaw/workspace/skills/ai-insurance-advisor
+cd /Users/walter/.openclaw/workspace/skills/ai-insurance-advisor
 echo '{"age":35,"gender":"男","coverage_amount":500000,"product_types":["重疾险"],"payment_term":"20年"}' | python3 scripts/premium_calculator.py
 ```
 
 ### 方案设计
 ```bash
-cd /home/walter/.openclaw/workspace/skills/ai-insurance-advisor
+cd /Users/walter/.openclaw/workspace/skills/ai-insurance-advisor
 echo '{"age":35,"gender":"男","annual_income":500000,"annual_budget":500000,"coverage_needs":{"death":2000000,"critical_illness":1500000,"hospital":4000000}}' | python3 scripts/plan_designer.py
 ```
 

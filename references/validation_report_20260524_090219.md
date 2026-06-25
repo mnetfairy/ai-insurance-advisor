@@ -1,7 +1,7 @@
 # 保险产品数据有效性校验报告
 
 **生成时间**: 2026-05-24 09:02:19
-**数据库路径**: /home/walter/.openclaw/workspace/skills/ai-insurance-advisor/references/products.json
+**数据库路径**: /Users/walter/.openclaw/workspace/skills/ai-insurance-advisor/references/products.json
 **校验方式**: 数据库状态统计
 
 ## 数据库状态概览
