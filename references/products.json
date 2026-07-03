@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "version": "1.8.327",
-    "updated_at": "2026-07-03T17:57:39.294547",
+    "version": "1.8.329",
+    "updated_at": "2026-07-03T18:00:18.113691",
     "description": "保险产品库整理版，保留在售及有效产品",
     "total_products": 2612,
     "active_products": 237,
@@ -92736,7 +92736,9 @@
         "confidence": 0.95,
         "source": "https://cainiubao.com/thread-48305-1-1.html",
         "pattern": "xxx_company_xxx_product"
-      }
+      },
+      "_meta_last_dedup": "2026-07-03T18:00:18.041656",
+      "_meta_updated_at": "2026-07-03T18:00:18.113691"
     },
     {
       "id": "3b8dcf59e5a5",
@@ -92749,7 +92751,9 @@
         "confidence": 0.95,
         "source": "http://finance.people.com.cn/insurance/n/2014/1203/c59941-26139068.html",
         "pattern": "xxx_company_xxx_product"
-      }
+      },
+      "_meta_last_dedup": "2026-07-03T18:00:18.042069",
+      "_meta_updated_at": "2026-07-03T18:00:18.113691"
     },
     {
       "id": "139f8b9d920a",
@@ -92762,7 +92766,9 @@
         "confidence": 0.95,
         "source": "https://pic.bankofchina.com/bocappd/agreement/202008/P020200818391397906953.pdf",
         "pattern": "xxx_company_xxx_product"
-      }
+      },
+      "_meta_last_dedup": "2026-07-03T18:00:18.042404",
+      "_meta_updated_at": "2026-07-03T18:00:18.113691"
     },
     {
       "id": "6f30f9f43629",
@@ -92775,7 +92781,9 @@
         "confidence": 0.95,
         "source": "https://www.e-chinalife.com/c/2025-06-19/b0f25132-1a91-48c7-8dc7-9942efdac021.shtml",
         "pattern": "xxx_company_xxx_product"
-      }
+      },
+      "_meta_last_dedup": "2026-07-03T18:00:18.042719",
+      "_meta_updated_at": "2026-07-03T18:00:18.113691"
     },
     {
       "id": "0bf5e849eb7e",
@@ -92788,7 +92796,9 @@
         "confidence": 0.95,
         "source": "https://www.e-chinalife.com/c/2025-06-19/b0f25132-1a91-48c7-8dc7-9942efdac021.shtml",
         "pattern": "xxx_company_xxx_product"
-      }
+      },
+      "_meta_last_dedup": "2026-07-03T18:00:18.043025",
+      "_meta_updated_at": "2026-07-03T18:00:18.113691"
     },
     {
       "id": "980e72f4b3ef",
@@ -92801,7 +92811,9 @@
         "confidence": 0.95,
         "source": "https://www.e-chinalife.com/c/2025-06-19/b0f25132-1a91-48c7-8dc7-9942efdac021.shtml",
         "pattern": "xxx_company_xxx_product"
-      }
+      },
+      "_meta_last_dedup": "2026-07-03T18:00:18.043342",
+      "_meta_updated_at": "2026-07-03T18:00:18.113691"
     },
     {
       "id": "fc56566089ba",
@@ -92814,7 +92826,9 @@
         "confidence": 0.95,
         "source": "https://www.e-chinalife.com/c/2025-06-19/b0f25132-1a91-48c7-8dc7-9942efdac021.shtml",
         "pattern": "xxx_company_xxx_product"
-      }
+      },
+      "_meta_last_dedup": "2026-07-03T18:00:18.043650",
+      "_meta_updated_at": "2026-07-03T18:00:18.113691"
     }
   ]
 }
