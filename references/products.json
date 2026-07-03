@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "version": "1.8.324",
-    "updated_at": "2026-07-02T21:44:29.361461+00:00",
+    "version": "1.8.327",
+    "updated_at": "2026-07-03T17:57:39.294547",
     "description": "保险产品库整理版，保留在售及有效产品",
     "total_products": 2612,
     "active_products": 237,
@@ -56,7 +56,7 @@
       "终身寿险": 40
     },
     "active_count": 648,
-    "lastUpdated": "2026-07-02T21:44:29.359512+00:00"
+    "lastUpdated": "2026-07-03T09:53:29.096110+00:00"
   },
   "products": [
     {
@@ -92724,6 +92724,97 @@
       "source": "comprehensive_scraper",
       "is_active": true,
       "addedAt": "2026-05-29T00:10:57.623798+00:00"
+    },
+    {
+      "id": "7fdf53d14825",
+      "name": "专业化健康险",
+      "company": "众安在线财产保险",
+      "type": "医疗险",
+      "addedAt": "2026-07-03T17:57:39.294569",
+      "is_active": true,
+      "_meta": {
+        "confidence": 0.95,
+        "source": "https://cainiubao.com/thread-48305-1-1.html",
+        "pattern": "xxx_company_xxx_product"
+      }
+    },
+    {
+      "id": "3b8dcf59e5a5",
+      "name": "专项防癌险",
+      "company": "太平人寿保险",
+      "type": "防癌险",
+      "addedAt": "2026-07-03T17:57:39.294575",
+      "is_active": true,
+      "_meta": {
+        "confidence": 0.95,
+        "source": "http://finance.people.com.cn/insurance/n/2014/1203/c59941-26139068.html",
+        "pattern": "xxx_company_xxx_product"
+      }
+    },
+    {
+      "id": "139f8b9d920a",
+      "name": "金满盈两全保险",
+      "company": "阳光人寿保险",
+      "type": "其他",
+      "addedAt": "2026-07-03T17:57:39.294579",
+      "is_active": true,
+      "_meta": {
+        "confidence": 0.95,
+        "source": "https://pic.bankofchina.com/bocappd/agreement/202008/P020200818391397906953.pdf",
+        "pattern": "xxx_company_xxx_product"
+      }
+    },
+    {
+      "id": "6f30f9f43629",
+      "name": "积极响应社会大众日益增长的健康保",
+      "company": "中国人寿保险",
+      "type": "重疾险",
+      "addedAt": "2026-07-03T17:57:39.294582",
+      "is_active": true,
+      "_meta": {
+        "confidence": 0.95,
+        "source": "https://www.e-chinalife.com/c/2025-06-19/b0f25132-1a91-48c7-8dc7-9942efdac021.shtml",
+        "pattern": "xxx_company_xxx_product"
+      }
+    },
+    {
+      "id": "0bf5e849eb7e",
+      "name": "首款费率可调的长期医疗保险",
+      "company": "中国人寿保险",
+      "type": "医疗险",
+      "addedAt": "2026-07-03T17:57:39.294584",
+      "is_active": true,
+      "_meta": {
+        "confidence": 0.95,
+        "source": "https://www.e-chinalife.com/c/2025-06-19/b0f25132-1a91-48c7-8dc7-9942efdac021.shtml",
+        "pattern": "xxx_company_xxx_product"
+      }
+    },
+    {
+      "id": "980e72f4b3ef",
+      "name": "首款保证续保期间为十年的医疗保险",
+      "company": "中国人寿保险",
+      "type": "医疗险",
+      "addedAt": "2026-07-03T17:57:39.294586",
+      "is_active": true,
+      "_meta": {
+        "confidence": 0.95,
+        "source": "https://www.e-chinalife.com/c/2025-06-19/b0f25132-1a91-48c7-8dc7-9942efdac021.shtml",
+        "pattern": "xxx_company_xxx_product"
+      }
+    },
+    {
+      "id": "fc56566089ba",
+      "name": "按照合同院外特定重大疾病急需药品费用保险",
+      "company": "中国人寿保险",
+      "type": "重疾险",
+      "addedAt": "2026-07-03T17:57:39.294588",
+      "is_active": true,
+      "_meta": {
+        "confidence": 0.95,
+        "source": "https://www.e-chinalife.com/c/2025-06-19/b0f25132-1a91-48c7-8dc7-9942efdac021.shtml",
+        "pattern": "xxx_company_xxx_product"
+      }
     }
   ]
 }
