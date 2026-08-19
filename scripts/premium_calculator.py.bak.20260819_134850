@@ -18,7 +18,7 @@ def load_products():
 
 def calculate_premium(product, age, gender, coverage_amount, payment_term=None, coverage_year=None):
     """计算单一产品保费"""
-    product_type = product.get("type")
+    product_type = product["type"]
 
     # 基础费率调整系数
     age_factor = 1.0
@@ -98,13 +98,13 @@ def calculate_all_premiums(age, gender, coverage_amount, product_types=None, pay
     for product in products:
         # 按类型筛选
         if product_types:
-            if product.get("type") not in product_types:
+            if product["type"] not in product_types:
                 continue
 
         # 年龄筛选
-        if age > 55 and product.get("type") in ["定期寿险", "储蓄险"]:
+        if age > 55 and product["type"] in ["定期寿险", "储蓄险"]:
             continue  # 定期寿险55岁以上不推荐
-        if age > 60 and product.get("type") == "意外险":
+        if age > 60 and product["type"] == "意外险":
             continue
 
         # 计算保费
@@ -112,7 +112,7 @@ def calculate_all_premiums(age, gender, coverage_amount, product_types=None, pay
         available_terms = product.get("payment_terms", ["年交"])
 
         for term in available_terms:
-            if product.get("type") in ["医疗险", "意外险"]:
+            if product["type"] in ["医疗险", "意外险"]:
                 term_premium = calculate_premium(product, age, gender, coverage_amount, "年交")
             else:
                 term_premium = calculate_premium(product, age, gender, coverage_amount, term)
@@ -123,28 +123,28 @@ def calculate_all_premiums(age, gender, coverage_amount, product_types=None, pay
 
         # 如果指定了缴费期，只返回该缴费期
         if payment_term and payment_term in premiums_by_term:
-            results[product.get("id")] = {
-                "name": product.get("name"),
-                "company": product.get("company"),
-                "type": product.get("type"),
+            results[product["id"]] = {
+                "name": product["name"],
+                "company": product["company"],
+                "type": product["type"],
                 "annual_premium": premiums_by_term[payment_term],
                 "payment_term": payment_term,
                 "coverage_amount": coverage_amount,
-                "coverage_period": product.get("coverage_period"),
-                "waiting_period": product.get("waiting_period"),
+                "coverage_period": product["coverage_period"],
+                "waiting_period": product["waiting_period"],
                 "core_coverage": ", ".join(product.get("key_benefits", [])) if isinstance(product.get("key_benefits"), list) else product.get("core_coverage", ""),
                 "notes": product.get("notes", "")
             }
         else:
             # 返回所有可用缴费期
-            results[product.get("id")] = {
-                "name": product.get("name"),
-                "company": product.get("company"),
-                "type": product.get("type"),
+            results[product["id"]] = {
+                "name": product["name"],
+                "company": product["company"],
+                "type": product["type"],
                 "premiums_by_term": premiums_by_term,
                 "coverage_amount": coverage_amount,
-                "coverage_period": product.get("coverage_period"),
-                "waiting_period": product.get("waiting_period"),
+                "coverage_period": product["coverage_period"],
+                "waiting_period": product["waiting_period"],
                 "core_coverage": ", ".join(product.get("key_benefits", [])) if isinstance(product.get("key_benefits"), list) else product.get("core_coverage", ""),
                 "notes": product.get("notes", "")
             }
@@ -158,18 +158,18 @@ def compare_payment_terms(products_list, age, gender, coverage_amount):
     comparison = []
 
     for product in products:
-        if product.get("id") not in products_list:
+        if product["id"] not in products_list:
             continue
 
         row = {
-            "product_id": product.get("id"),
-            "name": product.get("name"),
-            "company": product.get("company"),
-            "type": product.get("type")
+            "product_id": product["id"],
+            "name": product["name"],
+            "company": product["company"],
+            "type": product["type"]
         }
 
         for term in product.get("payment_terms", []):
-            if product.get("type") in ["医疗险", "意外险"]:
+            if product["type"] in ["医疗险", "意外险"]:
                 annual = calculate_premium(product, age, gender, coverage_amount, "年交")
             else:
                 annual = calculate_premium(product, age, gender, coverage_amount, term)
