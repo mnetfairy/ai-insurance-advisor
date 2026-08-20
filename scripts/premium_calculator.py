@@ -9,12 +9,86 @@ import json
 import sys
 import os
 
-def load_products():
-    """加载产品数据"""
+
+def _extract_quality_hints(product):
+    """🆕 2026-08-20 quality-aware：从产品提取质量提示
+
+    基于 P0/P1 数据处理引入的字段（产品库质量治理）：
+    - data_quality="garbage" → skip_for_recommendation=True （37 个产品过滤）
+    - coverage_period_quality="missing" → coverage_period 替换为"未明确"（112 个产品）
+    - listing_time_quality=verified/estimated/missing/unknown → 各自对应 disclaimer
+      （verified=541 / estimated=80 / missing=75 / unknown=1838）
+
+    Returns:
+        dict: {
+            skip_for_recommendation: bool,
+            disclaimers: list[str],
+            coverage_period: str | None,
+            data_quality: str | None,
+            coverage_period_quality: str | None,
+            listing_time_quality: str | None,
+        }
+    """
+    result = {
+        "skip_for_recommendation": False,
+        "disclaimers": [],
+        "coverage_period": product.get("coverage_period"),
+        "data_quality": product.get("data_quality"),
+        "coverage_period_quality": product.get("coverage_period_quality"),
+        "listing_time_quality": product.get("listing_time_quality"),
+    }
+
+    # P0-1: garbage 数据不可信，跳过推荐
+    if product.get("data_quality") == "garbage":
+        result["skip_for_recommendation"] = True
+        result["disclaimers"].append(
+            "⚠️ 此产品信息未完全核实，请联系保险公司确认详情"
+        )
+
+    # P0-2 coverage_period: missing 提示 + 默认"未明确"
+    if product.get("coverage_period_quality") == "missing":
+        result["coverage_period"] = "未明确"
+        result["disclaimers"].append(
+            "⚠️ 保险期间未明确，建议联系保险公司确认"
+        )
+
+    # P0-2 listing_time: 分级 disclaimer（verified 不加提示）
+    ltq = product.get("listing_time_quality")
+    if ltq == "estimated":
+        result["disclaimers"].append(
+            "ℹ️ 上市时间为估算值（年/月推测），仅作参考"
+        )
+    elif ltq == "missing":
+        result["disclaimers"].append(
+            "ℹ️ 上市时间不详，建议咨询保险公司最新产品"
+        )
+    elif ltq == "unknown":
+        result["disclaimers"].append(
+            "ℹ️ 上市时间无法核实，建议联系保险公司确认"
+        )
+
+    return result
+
+
+def load_products(filter_garbage=True):
+    """加载产品数据。
+
+    Args:
+        filter_garbage: True=跳过 data_quality=garbage 的产品（默认）。
+
+    Returns:
+        list[dict]: 产品列表（已过滤 garbage）
+    """
     product_file = os.path.join(os.path.dirname(__file__), "../references/products.json")
     with open(product_file, 'r', encoding='utf-8') as f:
         data = json.load(f)
-    return data["products"]
+    products = data["products"]
+    if filter_garbage:
+        products = [
+            p for p in products
+            if _extract_quality_hints(p)["skip_for_recommendation"] is False
+        ]
+    return products
 
 def calculate_premium(product, age, gender, coverage_amount, payment_term=None, coverage_year=None):
     """计算单一产品保费"""
@@ -91,7 +165,7 @@ def calculate_premium(product, age, gender, coverage_amount, payment_term=None, 
 
 
 def calculate_all_premiums(age, gender, coverage_amount, product_types=None, payment_term=None, coverage_year=None):
-    """计算所有符合条件的产品的保费"""
+    """计算所有符合条件的产品的保费（quality-aware）"""
     products = load_products()
 
     results = {}
@@ -121,6 +195,9 @@ def calculate_all_premiums(age, gender, coverage_amount, product_types=None, pay
             term_name = term
             premiums_by_term[term_name] = term_premium
 
+        # 🆕 2026-08-20 quality-aware：获取 disclaimers 和数据质量标记
+        hints = _extract_quality_hints(product)
+
         # 如果指定了缴费期，只返回该缴费期
         if payment_term and payment_term in premiums_by_term:
             results[product.get("id")] = {
@@ -130,10 +207,15 @@ def calculate_all_premiums(age, gender, coverage_amount, product_types=None, pay
                 "annual_premium": premiums_by_term[payment_term],
                 "payment_term": payment_term,
                 "coverage_amount": coverage_amount,
-                "coverage_period": product.get("coverage_period"),
+                "coverage_period": hints["coverage_period"],  # 🆕 缺失时为"未明确"
                 "waiting_period": product.get("waiting_period"),
                 "core_coverage": ", ".join(product.get("key_benefits", [])) if isinstance(product.get("key_benefits"), list) else product.get("core_coverage", ""),
-                "notes": product.get("notes", "")
+                "notes": product.get("notes", ""),
+                # 🆕 质量提示（SKILL 用来给客户附 disclaimer）
+                "data_quality": hints["data_quality"],
+                "coverage_period_quality": hints["coverage_period_quality"],
+                "listing_time_quality": hints["listing_time_quality"],
+                "disclaimers": hints["disclaimers"],
             }
         else:
             # 返回所有可用缴费期
@@ -143,10 +225,15 @@ def calculate_all_premiums(age, gender, coverage_amount, product_types=None, pay
                 "type": product.get("type"),
                 "premiums_by_term": premiums_by_term,
                 "coverage_amount": coverage_amount,
-                "coverage_period": product.get("coverage_period"),
+                "coverage_period": hints["coverage_period"],  # 🆕 缺失时为"未明确"
                 "waiting_period": product.get("waiting_period"),
                 "core_coverage": ", ".join(product.get("key_benefits", [])) if isinstance(product.get("key_benefits"), list) else product.get("core_coverage", ""),
-                "notes": product.get("notes", "")
+                "notes": product.get("notes", ""),
+                # 🆕 质量提示（SKILL 用来给客户附 disclaimer）
+                "data_quality": hints["data_quality"],
+                "coverage_period_quality": hints["coverage_period_quality"],
+                "listing_time_quality": hints["listing_time_quality"],
+                "disclaimers": hints["disclaimers"],
             }
 
     return results
