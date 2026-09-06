@@ -3,7 +3,7 @@ name: ai-insurance-advisor
 description: 中国大陆保险顾问。本 skill 仅覆盖 6 项实际实现的能力：保险需求分析（needs_analyzer.py）、产品对比（premium_calculator.py + 本地 products.json）、保费计算（premium_calculator.py）、方案设计（plan_designer.py）、保险知识问答（insurance-knowledge.md）、合规要点提示（compliance.md）。不提供核保预审、理赔代办、朋友圈/营销文案生成、培训话术、代理人展业工具等能力——这些场景请转人工或调用专业服务。
 version: 2.0.80
 tags: insurance, china, financial, advisor, product-comparison, medical, family-protection, health
-last_published: 2026-09-06
+last_published: 2026-09-07
 permissions:
   filesystem:
     read:
