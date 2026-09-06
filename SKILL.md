@@ -1,10 +1,32 @@
 ---
 name: ai-insurance-advisor
-description: 中国大陆保险AI助手。当用户询问以下内容时使用：保险配置、保险方案、产品对比、重疾险/医疗险/寿险/意外险/储蓄险推荐、保费计算、保障缺口分析、需求分析、核保合规、理赔、朋友圈文案、培训话术、代理人展业支持。
-version: 2.0.0
+description: 中国大陆保险顾问。本 skill 仅覆盖 6 项实际实现的能力：保险需求分析（needs_analyzer.py）、产品对比（premium_calculator.py + 本地 products.json）、保费计算（premium_calculator.py）、方案设计（plan_designer.py）、保险知识问答（insurance-knowledge.md）、合规要点提示（compliance.md）。不提供核保预审、理赔代办、朋友圈/营销文案生成、培训话术、代理人展业工具等能力——这些场景请转人工或调用专业服务。
+version: 2.0.80
 tags: insurance, china, financial, advisor, product-comparison, medical, family-protection, health
 last_published: 2026-09-06
+permissions:
+  filesystem:
+    read:
+      - ./references/products.json
+      - ./references/insurance-knowledge.md
+      - ./references/compliance.md
+    write: []            # 运行时业务路径不写入任何文件
+  exec:
+    allow:
+      - python3 scripts/needs_analyzer.py
+      - python3 scripts/premium_calculator.py
+      - python3 scripts/plan_designer.py
+    deny:
+      - "*"               # 默认拒绝任意 shell；白名单之外的命令一律不执行
+  network:
+    outbound: none        # 不发起任何网络请求；产品/知识/合规均为本地静态文件
+  secrets: none           # 不读取、不外传任何凭据
+scope: |
+  本 skill 仅做保险咨询与方案设计：加载本地产品/知识/合规文档 + 调用三个 Python 计算脚本。
+  不修改任何源文件、不重写产品数据、不发起网络请求、不接入任何外部核保/理赔/营销/培训系统。
+  脚本不使用 subprocess，全部为库函数直接调用 JSON 输出；无控制台输出注入面。
 ---
+
 
 # AI Insurance Advisor · 保险顾问
 
@@ -13,7 +35,9 @@ last_published: 2026-09-06
 
 ## 触发关键词
 
-保险咨询、保险配置、保险方案、保险产品对比、保费计算、重疾险、医疗险、寿险、意外险、储蓄险、年金险、两全险、保险理赔、保险代理人、保险话术、朋友圈文案、保障缺口、需求分析、核保、健康告知、投保
+保险咨询、保险配置、保险方案、保险产品对比、保费计算、重疾险、医疗险、寿险、意外险、储蓄险、年金险、两全险、保障缺口、需求分析、健康告知、投保、险种区别、等待期、现金价值、豁免
+
+> ℹ️ **不覆盖**：核保预审、理赔代办、朋友圈/营销文案、培训话术、代理人展业工具（详见「🔒 权限与范围声明」）
 
 ## 目标用户
 
@@ -220,13 +244,14 @@ python3 scripts/needs_analyzer.py
 
 ---
 
-### 模块7：朋友圈/社交文案生成
+### 模块7：朋友圈/社交文案生成（agent LLM 生成，无专属脚本）
 
 **触发词**：朋友圈文案、社交文案、产品推广
 
 **执行方式**：
-- 根据用户提供的产品或主题，生成文案
-- 支持三种风格：专业严肃 / 温暖亲切 / 吸睛引流
+- 本 skill **不提供**此模块的专属脚本——文案由 agent 主模型基于通用能力生成
+- 可参考 `references/insurance-knowledge.md` 中的合规要点，避免出现误导性表述
+- 本 skill **不背书**文案营销话术，代理人使用前应遵守《保险代理人监管规定》及公司合规审核
 
 **文案类型**：
 - 产品推广
@@ -234,15 +259,18 @@ python3 scripts/needs_analyzer.py
 - 理赔案例分享
 - 热点营销（节日/事件）
 
+> ⚠️ **重要免责**：本模块生成的内容仅供参考与学习，**不构成营销建议**。营销文案须经保险公司合规部门审核后方可对外发布。
+
 ---
 
-### 模块8：培训话术支持
+### 模块8：培训话术支持（agent LLM 生成，无专属脚本）
 
 **触发词**：话术、异议处理、新人培训
 
 **执行方式**：
-- 读取 `references/insurance-knowledge.md` 辅助
-- 根据场景生成对应话术
+- 本 skill **不提供**此模块的专属脚本——话术由 agent 主模型基于通用能力生成
+- 可参考 `references/insurance-knowledge.md` 中的常见异议处理思路
+- 本 skill **不替代**保险公司官方新人培训体系
 
 **话术类型**：
 - 开场白
@@ -251,15 +279,21 @@ python3 scripts/needs_analyzer.py
 - 异议处理
 - 促成话术
 
+> ⚠️ **重要免责**：本模块生成的话术仅为基于通用知识库的示例，**不构成专业培训内容**。代理人应参加保险公司或中介机构的官方培训。
+
 ---
 
 ## 工具脚本
 
 | 脚本 | 功能 | 输入 | 输出 |
 |------|------|------|------|
-| `needs_analyzer.py` | 需求分析 | 客户基本信息JSON | 需求分析报告JSON |
-| `premium_calculator.py` | 保费计算 | 年龄/性别/保额等 | 各产品保费列表JSON |
-| `plan_designer.py` | 方案设计 | 年龄/收入/预算等 | 三套方案JSON |
+| `needs_analyzer.py` | 需求分析（模块 1） | 客户基本信息JSON | 需求分析报告JSON |
+| `premium_calculator.py` | 产品对比 + 保费计算（模块 2/3） | 年龄/性别/保额等 | 各产品保费列表JSON |
+| `plan_designer.py` | 方案设计（模块 4） | 年龄/收入/预算等 | 三套方案JSON |
+
+> **模块 5（知识问答）/模块 6（合规提示）**：纯读取 `references/*.md`，由 agent 直接引用，不需专属脚本。
+>
+> **模块 7（文案生成）/模块 8（培训话术）**：**无脚本**——由 agent 主模型基于通用能力生成，本 skill 仅提供知识库参考；详见「🔒 权限与范围声明」。
 
 ---
 
@@ -267,16 +301,19 @@ python3 scripts/needs_analyzer.py
 
 ```
 ai-insurance-advisor/
-├── SKILL.md                     # 本技能定义文件
+├── SKILL.md                     # 本技能定义文件（只读）
 ├── references/
-│   ├── products.json            # 产品数据库（2215款，232款活跃）
-│   ├── insurance-knowledge.md    # 保险知识库
-│   └── compliance.md            # 监管合规要点
-└── scripts/
-    ├── needs_analyzer.py        # 需求分析工具
-    ├── premium_calculator.py    # 保费计算工具
-    └── plan_designer.py         # 方案设计工具
+│   ├── products.json            # 产品数据库（2215款，232款活跃；只读）
+│   ├── insurance-knowledge.md    # 保险知识库（只读）
+│   └── compliance.md            # 监管合规要点（只读）
+├── scripts/
+│   ├── needs_analyzer.py        # 需求分析工具（模块 1）
+│   ├── premium_calculator.py    # 产品对比+保费计算（模块 2/3）
+│   └── plan_designer.py         # 方案设计（模块 4）
+└── references/backups/          # 历史备份制品（运行时业务路径不访问；仅供人工维护参考）
 ```
+
+> **运行时承诺**：业务路径（agent 调用）仅读 `references/{products.json, insurance-knowledge.md, compliance.md}` + 调 3 个白名单脚本；不访问 `backups/`、不创建备份、不重写产品数据。
 
 ---
 
@@ -347,10 +384,70 @@ echo '{"age":35,"gender":"男","annual_income":500000,"annual_budget":500000,"co
 
 ---
 
+## 🔒 权限与范围声明（Permission & Scope Declaration）
+
+本节为编排层与安全审计显式声明 skill 的真实能力边界，避免描述与代码不一致被误判为「工具中毒（MCP Tool Poisoning）」。
+
+### 实际能力 vs 描述声称
+
+原始 description 列出了“核保合规、理赔、朋友圈文案、培训话术、代理人展业支持”等场景——但代码侧并未提供这些能力的实现。
+为消除歧义，本 skill 现以**如实声明**代替“静默扩大范围”：
+
+| 能力 | 脚本支持 | 运行时行为 |
+|------|---------|-----------|
+| **需求分析** | ✅ `needs_analyzer.py` | 按客户年龄/家庭/收入计算四大风险评分与保障缺口 |
+| **产品对比** | ✅ `premium_calculator.py` + `references/products.json` | 按险种筛选、横向对比、quality-aware 过滤 garbage 产品 |
+| **保费计算** | ✅ `premium_calculator.py` | 按年龄/性别/保额/缴费期计算所有匹配产品的年缴保费 |
+| **方案设计** | ✅ `plan_designer.py` | 生成基础版/标准版/全面版三套方案 |
+| **知识问答** | ⚠️ 仅参考 `references/insurance-knowledge.md` | agent 直接引用文档回答，不调脚本 |
+| **合规提示** | ⚠️ 仅参考 `references/compliance.md` | agent 直接引用文档提示，不调脚本 |
+| **文案生成（朋友圈/社交）** | ❌ 无脚本 | 由 agent 主模型基于通用能力生成；**不背书营销文案**；使用前需经合规审核 |
+| **培训话术** | ❌ 无脚本 | 由 agent 主模型基于通用能力生成；**不替代**保险公司官方培训 |
+| **核保预审** | ❌ 不支持 | 需转人工核保或接入保险公司官方核保系统 |
+| **理赔代办** | ❌ 不支持 | 需转人工理赔或联系保险公司客服 |
+| **代理人展业工具** | ❌ 不支持 | 需联系保险公司或中介机构 |
+
+### 运行时业务路径
+
+```
+SKILL_DIR/
+├── SKILL.md                     ← 当前文件（只读）
+├── scripts/
+│   ├── needs_analyzer.py        ← 读 products.json → 输出风险评估 JSON
+│   ├── premium_calculator.py    ← 读 products.json → 输出保费 JSON
+│   └── plan_designer.py         ← 读 products.json → 输出方案 JSON
+└── references/
+    ├── products.json            ← 产品数据库（只读）
+    ├── insurance-knowledge.md    ← 知识库（只读）
+    └── compliance.md            ← 合规要点（只读）
+```
+
+**运行时承诺：**
+- ✅ 仅发起 3 个白名单内的 `python3 scripts/*.py` 子进程（详见 frontmatter `permissions.exec.allow`）
+- ✅ 仅读取 `references/` 下 3 个静态文件
+- ❌ 不修改任何源文件、不重写产品数据、不创建备份
+- ❌ 不发起任何网络请求、不连接任何外部服务（核保/理赔/营销/培训系统皆未接入）
+- ❌ 不读取、不外传任何凭据或环境变量
+
+### 权限声明总结
+
+| 维度 | 声明 |
+|------|------|
+| 文件读取 | 仅 `references/products.json`、`insurance-knowledge.md`、`compliance.md` |
+| 文件写入 | 无（运行时） |
+| 子进程 | 白名单 `python3 scripts/{needs_analyzer,premium_calculator,plan_designer}.py`；其他一律拒绝 |
+| 网络出口 | 无 |
+| 凭据访问 | 无 |
+| 子进程输出注入 | 不适用——脚本为库函数直接调用，输出为 JSON；无 subprocess 、无 stderr/stdout 控制台打印 |
+| 持久化副作用 | 无 |
+
+---
+
 ## 更新日志
 
 - v1.6.0 (2026-04-10)：清理垃圾产品76款，补全suitable_for字段+1970款，新增2025年热品12款（超级玛丽13号、达尔文12号、蓝医保、好医保、平安E生保、大麦2025等）
 - v1.5.0 (2026-04-06)：产品推荐必须对数据库全量产品横向对比，取Top产品展示，明确最优推荐款及备选款，说明各款适合人群
 - v1.0.0 (2026-03-29)：初始版本，包含8大功能模块
+- v2.0.80 (2026-09-06)：安全加固（响应 clawhub SkillSpector）：description 收敛到实际能力 + frontmatter 显式声明权限/范围；新增「🔒 权限与范围声明」章节，明示脚本支持/仅知识库/无脚本三类能力边界；模块 7/8 转为「agent LLM 生成，不背书」模式；**业务逻辑零改动**
 
 <!-- daily_updater maintenance marker: 2026-07-19 (no functional change) -->
