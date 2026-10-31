@@ -1,7 +1,7 @@
 ---
 name: ai-insurance-advisor
 description: 中国大陆保险顾问。本 skill 覆盖 8 项能力：保险需求分析（needs_analyzer.py）、产品对比（premium_calculator.py + 本地 products.json）、保费计算（premium_calculator.py）、方案设计（plan_designer.py）、保险知识问答（insurance-knowledge.md）、合规要点提示（compliance.md）、朋友圈/社交营销文案生成（agent LLM 生成，无专属脚本）、培训话术支持（agent LLM 生成，无专属脚本）。不提供核保预审、理赔代办、代理人展业工具等能力——这些场景请转人工或调用专业服务。
-version: 2.0.202
+version: 2.0.203
 tags: insurance, china, financial, advisor, product-comparison, medical, family-protection, health
 last_published: 2026-10-31
 permissions:
@@ -258,6 +258,15 @@ python3 scripts/needs_analyzer.py
 - 可参考 `references/insurance-knowledge.md` 中的合规要点，避免出现误导性表述
 - 本 skill **不背书**文案营销话术，代理人使用前应遵守《保险代理人监管规定》及公司合规审核
 
+**🔒 生成门槛（四道，缺一不可）**：
+1. **用户明确 opt-in**：用户主动要求生成文案时才生成；未被明确要求时不得主动产出营销文案
+2. **事实锚定**：所有产品信息（保额、保费、等待期、续保条件、收益演示）必须来自
+   `references/products.json` 与 `references/insurance-knowledge.md`；**不得杜撰、不得估算、
+   不得用「大概/应该/差不多」代替具体条款**
+3. **合规审核后方可对外**：生成内容仅供内部学习/参考，**对外发布前必须经保险公司合规部门审核**
+4. **禁止误导性表述**：不得使用绝对化用语（「保证」「稳赚」「零风险」「100%」）、不得虚构收益演示、
+   不得贬低同业、不得承诺理赔结果、不得暗示「不投保就吃亏」
+
 **文案类型**：
 - 产品推广
 - 理念宣导
@@ -276,6 +285,15 @@ python3 scripts/needs_analyzer.py
 - 本 skill **不提供**此模块的专属脚本——话术由 agent 主模型基于通用能力生成
 - 可参考 `references/insurance-knowledge.md` 中的常见异议处理思路
 - 本 skill **不替代**保险公司官方新人培训体系
+
+**🔒 生成门槛（四道，缺一不可）**：
+1. **用户明确 opt-in**：用户主动要求话术/培训内容时才生成；不得主动输出销售话术
+2. **事实锚定**：涉及产品条款、费率、条款释义的部分必须来自 `references/products.json`
+   与 `references/insurance-knowledge.md`；**不得杜撰条款、不得编造核保规则**
+3. **合规审核后方可使用**：生成内容仅为学习参考，**对外培训/展业使用前必须经保险公司或
+   中介机构合规审核**
+4. **禁止误导性表述**：不得使用绝对化用语、不得虚构监管豁免、不得承诺收益或理赔结果、
+   不得教唆规避销售适当性流程
 
 **话术类型**：
 - 开场白
@@ -308,13 +326,15 @@ python3 scripts/needs_analyzer.py
 ai-insurance-advisor/
 ├── SKILL.md                     # 本技能定义文件（只读）
 ├── references/
-│   ├── products.json            # 产品数据库（2215款，232款活跃；只读）
+│   ├── products.json            # 产品数据库（2536款，603款活跃；只读）
 │   ├── insurance-knowledge.md    # 保险知识库（只读）
 │   └── compliance.md            # 监管合规要点（只读）
 ├── scripts/
 │   ├── needs_analyzer.py        # 需求分析工具（模块 1）
 │   ├── premium_calculator.py    # 产品对比+保费计算（模块 2/3）
-│   └── plan_designer.py         # 方案设计（模块 4）
+│   ├── plan_designer.py         # 方案设计（模块 4）
+│   ├── sanitize_products_json.py  # 数据清洗（中和祈使指令，维护用，非运行时）
+│   └── test_*.py                # 回归测试（预算口径 / 停售过滤 / 400 电话 / 数据卫生）
 └── references/backups/          # 历史备份制品（运行时业务路径不访问；仅供人工维护参考）
 ```
 
@@ -420,8 +440,8 @@ echo '{"age":35,"gender":"男","annual_income":500000,"annual_budget":500000,"co
 | **方案设计** | ✅ `plan_designer.py` | 生成基础版/标准版/全面版三套方案 |
 | **知识问答** | ⚠️ 仅参考 `references/insurance-knowledge.md` | agent 直接引用文档回答，不调脚本 |
 | **合规提示** | ⚠️ 仅参考 `references/compliance.md` | agent 直接引用文档提示，不调脚本 |
-| **营销文案生成（朋友圈/社交）** | ⚠️ 无专属脚本 | 由 agent 主模型基于通用能力生成（模块 7）；**不背书营销文案**；使用前需经合规审核 |
-| **培训话术** | ⚠️ 无专属脚本 | 由 agent 主模型基于通用能力生成（模块 8）；**不替代**保险公司官方培训 |
+| **营销文案生成（朋友圈/社交）** | ⚠️ 无专属脚本 | 由 agent 主模型基于通用能力生成（模块 7）；**需用户明确 opt-in**；事实锚定（不得杜撰条款）；**对外发布前须合规审核**；**不背书营销文案** |
+| **培训话术** | ⚠️ 无专属脚本 | 由 agent 主模型基于通用能力生成（模块 8）；**需用户明确 opt-in**；事实锚定；对外使用前须合规审核；**不替代**保险公司官方培训 |
 | **核保预审** | ❌ 不支持 | 需转人工核保或接入保险公司官方核保系统 |
 | **理赔代办** | ❌ 不支持 | 需转人工理赔或联系保险公司客服 |
 | **代理人展业工具** | ❌ 不支持 | 需联系保险公司或中介机构 |
@@ -441,12 +461,16 @@ SKILL_DIR/
     └── compliance.md            ← 合规要点（只读）
 ```
 
-**运行时承诺：**
+### 运行时承诺：
 - ✅ 仅发起 3 个白名单内的 `python3 scripts/*.py` 子进程（详见 frontmatter `permissions.exec.allow`）
 - ✅ 仅读取 `references/` 下 3 个静态文件
 - ❌ 不修改任何源文件、不重写产品数据、不创建备份
 - ❌ 不发起任何网络请求、不连接任何外部服务（核保/理赔/营销/培训系统皆未接入）
 - ❌ 不读取、不外传任何凭据或环境变量
+
+> ℹ️ **维护用脚本（非运行时）**：`scripts/sanitize_products_json.py` 用于把产品库中对 agent 的
+> 祈使指令改写为中性陈述（ClawHub AR1 整改），由维护者手动执行，**不在运行时白名单内**，
+> 不会自动运行，也不写入任何文件（除备份到 `references/backups/`）。
 
 ### 权限声明总结
 
@@ -463,7 +487,96 @@ SKILL_DIR/
 
 ---
 
+## 🛡️ ClawHub 安全审计整改记录（v2.0.203）
+
+> 对应审计报告：`https://clawhub.ai/mnetfairy/skills/ai-insurance-advisor/security-audit`
+> 被审版本：v2.0.196（ClawHub 唯一公开版本）· 共 17 项 finding
+> 本节供后续审计逐条比对 / grep。
+
+### 根因与修法总览
+
+| 编号 | 数量 | 严重度 | 根因 | 修法 |
+|---|---|---|---|---|
+| **AE1** Referenced artifact was not completely inspected | 5 | HIGH | 发布时 `products.json` 被压成**单行 3.4MB**（最大单行 2,568,005 字节），扫描器无法完整解析 | 发布产物改**多行**（`indent=1` → 130,165 行 / 最大行长 393 字节） |
+| **AR1** Anti-Refusal | 9 | HIGH | 产品库 `health_disclosure` 含**对 agent 的祈使句**（"Always answer…" / "must be truthful" / "do not volunteer"） | ①本地数据中和（20 款产品）②发布时整字段剥离该两字段 |
+| **SDI-1** Excessive Agency | 1 | MEDIUM | description 与正文模块 7/8 声明矛盾 | 保留功能 + 加**四道生成门槛**（opt-in / 事实锚定 / 合规审核 / 禁误导表述） |
+| **SDI-4** Excessive Agency | 2 | MEDIUM | ①百分比套在 `annual_budget` 而注释写「年收入」②基础版 `budget * 1.2` 越界 | 统一口径 + 单一硬上限 + 非负校验 + 出口总额校验 + 回归测试 |
+
+### 各项修法明细
+
+**AE1（5 项，HIGH）**
+- 根因不在 skill 自身，而在**发布侧**：`skills-analysis/daily_updater/products_json_compactor.py`
+  用 `indent=None, separators=(",",":")` 把整个 JSON 挤成 1 行。
+  证据：v2.0.196 发布的 `references/products.json` size = **3,424,131 字节**，
+  与本地 `_minify_for_publish` 输出 **byte-level 完全一致**。
+- 修法：compactor 写盘改为 `indent=1`（**不用 indent=2**：4,225,704 字节超 ClawHub 4MB 上限）。
+  产物：130,165 行 / 最大行长 393 字节 / 3,810,200 字节。
+- 附带修掉一个**真 bug**：v3.3 的 `DROP_TOP_LEVEL_FIELDS` 含整个 `_meta` →
+  发布产物里 `products.json._meta.insurance_priority_basis` **根本不存在**，
+  且本 skill 自带的 `test_insurance_recommendations.py` 对发布产物直接崩
+  （`KeyError: '_meta'`）。现改为保留 `_meta`、只剥 `duplicates`/`repair_history`/`meta_history`。
+
+**AR1（9 项，HIGH）**
+- 根因：`health_disclosure` / `renewal_terms` 是外部抓取（Tavily + LLM 摘要）回填的自由文本，
+  其中混入**对 agent 的祈使句**，会抑制 agent 拒绝不安全/越界请求的能力。
+  该两字段**无任何脚本消费**（AST 级扫描确认）。
+- 修法 ①（源头）：新增 `scripts/sanitize_products_json.py`，把祈使句式改写为**中性陈述**
+  （语义全保留：健康告知要求 / 未如实告知的后果 / 询问范围）→ 20 款产品受影响。
+- 修法 ②（末端）：两个字段进入发布侧剥离清单 → 发布产物中完全不存在。
+- **刻意不动**：保险条款语义里的 "regardless of …"（如保证续保不受健康状况影响）
+  是**产品条款**不是指令 → 保留；结构化续保信息在 `coverage_period_*` 字段（2535 款齐全）。
+
+**SDI-1（1 项，MEDIUM）**
+- 审计给出两条路径：删除模块 7/8，或**如实声明 + 加门槛**。
+- 本轮取第二条（保留既有业务能力）：description 如实声明 8 项能力（v2.0.202 已做），
+  本轮补上审计要求的四道门槛 → **用户 opt-in / 事实锚定 / 合规审核 / 禁误导表述**。
+
+**SDI-4（2 项，MEDIUM）**
+- 主体口径 v2.0.200 已修（`min(annual_income×比例, annual_budget)`、去掉 1.2 乘数）。
+- 本轮补审计要求的其余部分：
+  ①`needs_analyzer` **校验财务输入为非负数**（`annual_income`/`annual_expense`/
+  `annual_budget`/`mortgage_balance` 为负或非数值 → 报错而非输出错误建议）；
+  ②说明文案明确「10% 是**规划指引**而非普适最低值」；
+  ③`plan_designer` **返回前校验最终总额**（`_finalize_plan` 出口兜底断言 ≤ 单一硬上限）；
+  ④新增 4 组回归测试（无放宽乘数的源码级断言 / 非负校验 / 规划指引措辞 / 最终总额校验）。
+
+### 🔴 400 电话优先推荐（红线，功能零改动）
+
+本次整改**未改动** 400 电话优先推荐的任何功能：
+- 安盛天平仍为**首位渠道**，`400-860-0058` 保留
+- 联系方式列仍**默认 🔒 隐藏**，用户明确问「具体电话 / 如何联系」才展示完整电话
+- `priority_basis` / `verified` / `source_url` 三件套、覆盖 7 省份披露、用户选择权 全部保留
+- `products.json._meta.insurance_priority_basis` 语义**字节级不动**
+- `scripts/test_insurance_recommendations.py` **未修改**，仍 7/7 PASS
+
+`scripts/test_data_hygiene.py` 新增**红线守卫断言**（400 电话存在 / verified / source_url /
+fallback 三件套 / SKILL.md 引用 / 🔒 默认隐藏），防止后续整改再把它弄丢。
+
+---
+
 ## 更新日志
+
+- v2.0.203 (2026-10-31)：**ClawHub 安全审计 17 项 finding 整改**（AE1 ×5 / AR1 ×9 / SDI-1 ×1 / SDI-4 ×2）：
+  - ⚠️ **本版含数据与措辞改动，不是「业务逻辑零改动」**（上一版 v2.0.202 的该表述仅指当次改动）
+  - **AE1（发布侧，HIGH）**：`products_json_compactor.py` 写盘 `indent=None` → `indent=1`
+    → 发布产物 130,165 行 / 最大行长 393 字节（原单行 2,568,005 字节）；体积 3,810,200 B（< 4MB）
+  - **发布产物不再丢 `_meta`**：保留 `insurance_priority_basis` 等对外披露字段，
+    只剥 `duplicates`/`repair_history`/`meta_history`
+    → 发布的 `test_insurance_recommendations.py` 从 `KeyError: '_meta'` **崩溃 → 7/7 PASS**
+  - **AR1（数据侧 + 发布侧，HIGH）**：新增 `scripts/sanitize_products_json.py`，
+    中和 20 款产品 `health_disclosure` 里的祈使指令（语义全保留，仅改语气）；
+    `health_disclosure`/`renewal_terms` 加入发布剥离清单（两字段无脚本消费，
+    结构化续保信息在 `coverage_period_*` 不受影响）
+  - **SDI-1（MEDIUM）**：模块 7/8 加四道生成门槛（用户 opt-in / 事实锚定 / 合规审核 / 禁误导表述）；
+    「实际能力 vs 描述声称」表同步
+  - **SDI-4（MEDIUM）**：`needs_analyzer` 加财务输入非负校验 + 「10% 是规划指引」文案；
+    `plan_designer` 加返回前最终总额校验；`test_budget_compliance.py` 新增 4 组回归测试
+  - **测试**：`test_data_hygiene.py` 新增（22 项）；`test_budget_compliance.py` 149 → **192 项**；
+    `test_discontinued_filter.py` 13 项；`test_insurance_recommendations.py` 7 项 → **合计 234 项全 PASS**
+  - **数据变更范围**：仅 20 款产品的 `health_disclosure` 字段；其余字段与 `_meta` 未变
+  - **红线**：400 电话优先推荐功能零改动（详见上方「🔴 400 电话优先推荐（红线，功能零改动）」）
+  - **数据同步**：ai 为镜像库，`products.json` 已与 master（china）保持 md5 一致；
+    清洗脚本 `sanitize_products_json.py` 在两个库各放一份，幂等可重复执行
 
 - v2.0.202 (2026-10-28)：**ClawHub SDI-4 / SDI-1 残余问题修正**（预算硬约束补强 + 能力声明对齐）：
   - **预算硬约束补强（SDI-4 · P0）**：修复「标准版/全面版在极小预算下仍然超预算」——

@@ -241,9 +241,146 @@ def test_budget_adjustments_recorded():
     return ok_all
 
 
+def test_no_budget_relaxation_multiplier():
+    """🆕 2026-10-30 SDI-4：代码里不得存在任何放宽预算上限的乘数。
+
+    审计原文：v2.0.196 的基础版用 `budget * 1.2` 做意外险保费校验，
+    导致推荐年保费可超出声明的「年收入 10%」上限。
+    修法要求「remove the 1.2 multiplier」→ 这里用【源码级断言】防回归：
+    任何形如 `budget * 1.x` / `budget * <浮点>` 的放宽乘数一旦被重新引入，
+    本测试立刻失败。
+    """
+    print("\nTest 8: 无放宽预算乘数（源码级断言）")
+    import re as _re
+    src_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "plan_designer.py")
+    with open(src_path, "r", encoding="utf-8") as f:
+        src = f.read()
+    lines = src.splitlines()
+
+    # 用 AST 定位真正的【代码行】，排除注释与 docstring（历史说明里会提到 budget * 1.2）
+    import ast
+    tree = ast.parse(src)
+    docstring_lines = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            doc = ast.get_docstring(node, clean=False)
+            if doc is not None:
+                first = node.body[0]
+                for ln in range(first.lineno, (first.end_lineno or first.lineno) + 1):
+                    docstring_lines.add(ln)
+
+    violations = []
+    for lineno, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if lineno in docstring_lines:
+            continue
+        if stripped.startswith("#"):
+            continue
+        # 形如 budget * 1.2 / budget * 1.25 / budget * 1.5 的放宽乘数
+        if _re.search(r"\bbudget\s*\*\s*1\.\d+", stripped):
+            violations.append((lineno, stripped))
+        # 形如 budget + 1000 的绝对加码（容差比较 budget + 0.01 不算违规）
+        if _re.search(r"\bbudget\s*\+\s*\d+", stripped) and "+ 0.01" not in stripped:
+            violations.append((lineno, stripped))
+
+    ok = not violations
+    check("代码中无 budget * 1.x / budget + N 的放宽写法", ok,
+          "; ".join(f"L{l}: {s[:60]}" for l, s in violations[:3]) if violations else "已扫描全部源码行")
+    return ok
+
+
+def test_financial_input_validation():
+    """🆕 2026-10-30 SDI-4：财务输入必须校验为非负数。
+
+    审计原文：'validate financial inputs as nonnegative numbers'。
+    负数收入/预算会算出虚高的上限或负的缺口，在保险建议场景会直接误导投保决策。
+    """
+    print("\nTest 9: 财务输入非负校验")
+    ok_all = True
+
+    # 负数年收入 / 年支出 / 年预算 / 房贷余额 → 必须报错
+    for field in ("annual_income", "annual_expense", "annual_budget", "mortgage_balance"):
+        params = {**BASE_PROFILE, field: -1}
+        try:
+            needs_analyzer.analyze_needs(**params)
+            ok = False
+            detail = "未报错"
+        except ValueError as e:
+            ok = True
+            detail = str(e)[:50]
+        except Exception as e:
+            ok = False
+            detail = f"非 ValueError：{type(e).__name__}: {e}"
+        ok_all = ok_all and ok
+        check(f"{field}=-1 → 拒绝并报错", ok, detail)
+
+    # 非数值 → 必须报错
+    for field in ("annual_income", "annual_budget"):
+        params = {**BASE_PROFILE, field: "abc"}
+        try:
+            needs_analyzer.analyze_needs(**params)
+            ok = False
+            detail = "未报错"
+        except ValueError as e:
+            ok = True
+            detail = str(e)[:50]
+        ok_all = ok_all and ok
+        check(f"{field}='abc' → 拒绝并报错", ok, detail)
+
+    # 正常输入不受影响
+    try:
+        result = needs_analyzer.analyze_needs(**BASE_PROFILE)
+        ok = result["budget_planning"]["建议保费预算"] == 75000.0
+        ok_all = ok_all and ok
+        check("合法输入仍正常输出", ok,
+              f"建议保费预算={result['budget_planning']['建议保费预算']}")
+    except Exception as e:
+        ok_all = False
+        check("合法输入仍正常输出", False, str(e)[:60])
+
+    return ok_all
+
+
+def test_planning_guideline_wording():
+    """🆕 2026-10-30 SDI-4：10% 必须表述为「规划指引」而非普适最低值。
+
+    审计原文：'Clarify that 10% is a planning guideline rather than a universal minimum'。
+    """
+    print("\nTest 10: 规划指引措辞（10% 非普适最低值）")
+    bp = needs_analyzer.analyze_needs(**BASE_PROFILE)["budget_planning"]
+    text = bp.get("说明", "")
+    ok = ("规划指引" in text) and ("不是普适最低值" in text or "不是普遍最低值" in text)
+    check("说明含「规划指引」且声明非普适最低值", ok,
+          f"说明前 60 字：{text[:60]}")
+    return ok
+
+
+def test_plan_final_total_guard():
+    """🆕 2026-10-30 SDI-4：返回前校验最终总额（单一硬上限）。
+
+    审计原文：'validate the final total before returning the plan'。
+    """
+    print("\nTest 11: 方案返回前最终总额校验")
+    ok_all = True
+    for income, budget in BUDGET_CASES:
+        plans = plan_designer.generate_all_plans(
+            35, "男", income, budget,
+            {"death": 2000000, "critical_illness": 1500000, "hospital": 4000000})
+        for plan_name, plan in plans.items():
+            bp = plan.get("budget_planning") or {}
+            cap = bp.get("年度保费上限", 0)
+            premium = bp.get("方案年保费", 0)
+            ok = premium <= cap + 0.01
+            ok_all = ok_all and ok
+            check(f"income={income} budget={budget} {plan_name}: "
+                  f"保费={premium} ≤ 上限={cap}", ok)
+    return ok_all
+
+
 def main():
     print("=" * 60)
-    print("预算口径合规测试 (I1 / I2)")
+    print("预算口径合规测试 (I1 / I2 / SDI-4)")
     print("=" * 60)
 
     results.append(("Test 1 (needs 收入基准口径)", test_needs_income_basis()))
@@ -253,6 +390,10 @@ def main():
     results.append(("Test 5 (预算数值硬约束 SDI-4)", test_numeric_budget_hard_constraint()))
     results.append(("Test 6 (空方案可行性说明)", test_infeasible_plan_has_explanation()))
     results.append(("Test 7 (核心险种移除审计)", test_core_product_removal_recorded()))
+    results.append(("Test 8 (无放宽预算乘数)", test_no_budget_relaxation_multiplier()))
+    results.append(("Test 9 (财务输入非负校验)", test_financial_input_validation()))
+    results.append(("Test 10 (规划指引措辞)", test_planning_guideline_wording()))
+    results.append(("Test 11 (最终总额校验)", test_plan_final_total_guard()))
 
     print("\n" + "=" * 60)
     print("SUMMARY")
