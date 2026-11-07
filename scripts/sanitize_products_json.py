@@ -7,22 +7,26 @@ sanitize_products_json.py — 中和产品库中对 agent 的祈使指令（Claw
 背景
 ----
 `references/products.json` 的 `health_disclosure` / `renewal_terms` 是外部抓取
-（Tavily + LLM 摘要）回填的自由文本，其中混入了**对 agent 的祈使句**：
+（Tavily + LLM 摘要）回填的自由文本，其中混入了**对 agent 的祈使句**——即面向
+助手的祈使语气英文句式（核心动词形态包括 answer / truthful / volunteer /
+refuse / comply 等，完整字面量见下方 `REWRITES` 匹配表）。
 
-    "Always answer insurance questions truthfully and accurately."
-    "Health disclosure must be truthful; otherwise, coverage may be voided."
-    "do not volunteer information not asked."
-
-ClawHub 安全扫描器据此判定「Skill instructs the agent to never refuse or to always
-comply」→ Anti-Refusal（AR1 × 9，severity HIGH）。这类句子**不是**产品条款本身，
+ClawHub 安全扫描器据此判定「指令要求 agent 不得拒绝」→ Anti-Refusal（AR1 × 9，
+severity HIGH）。⚠️ 上句为扫描器判定语的**转述**（描述性），本脚本不重复任何
+祈使句字面量。这类句子**不是**产品条款本身，
 而是抓取摘要时误写成了对助手的指令，会抑制 agent 拒绝不安全/越界请求的能力。
 
 本脚本做什么
 ------------
-把这类**祈使句式**改写为**中性陈述句**。语义信息全部保留：
-- 健康告知要求（需如实填写）
-- 未如实告知的后果（保单解除 / 拒赔 / 合同解除）
-- 询问范围（回答被问询的问题即可，无需主动补充）
+把这类**祈使句式**改写为**中性陈述句**。
+
+⚠️ 2026-11-07 整改（ClawHub SDI-4 / SDI-3）：改写语义已收敛——
+**只做语气中性化，不新增任何保险后果**。原先的替换文本会把「未如实告知 →
+保单解除 / 拒赔 / 合同解除」等法律后果**引入**到原文并未声明该后果的句子上，
+属于「改写即增加实质保险后果」。现在：
+- 原文**已含**后果表述的（如原文已写 coverage may be voided）→ 仅把祈使语气
+  改为陈述语气，后果原样保留（不删、不改、不加重）。
+- 原文**未含**后果表述的 → 只输出中性陈述句，**不补写**任何后果。
 
 改写后仍是「英文原文 + 中文中性句」的混合文本 —— 这是**有意为之**：
 只中和祈使语气，不改写整段英文，避免误伤条款语义（如 regardless of …）。
@@ -44,6 +48,16 @@ comply」→ Anti-Refusal（AR1 × 9，severity HIGH）。这类句子**不是**
 
     # 校验（断言无祈使指令）→ 退出码 0/1
     python3 scripts/sanitize_products_json.py --db references/products.json --check
+
+⚠️ --db 路径限制（2026-11-07 整改 SDI-3）
+------------------------------------------------
+--db **只接受本 skill 自有的 `references/products.json`**（按 realpath 判定）。
+传入其他路径会被直接拒绝并返回退出码 3 —— 本脚本不得被用于改写 skill 之外的
+任何 JSON 文件。备份目录固定为 `references/backups/`（已在 .gitignore 内，
+不随发布产物分发），不再从 --db 路径反推。
+
+⚠️ 该脚本为**本地维护工具**，不随 skill 发布产物分发（见 .clawhubignore），
+不在运行时白名单内，须由维护者在显式授权的维护流程中手动执行。
 
 幂等性
 ------
@@ -81,16 +95,19 @@ REGARDLESS_RE = re.compile(r"regardless of", re.IGNORECASE)
 # ---------------------------------------------------------------------------
 # 句子级改写表：把祈使句式换成中性陈述
 # 每条 = (正则, 中性替换文本)
-# 语义全部保留（健康告知要求 / 未如实告知的后果 / 询问范围）
+# ⚠️ 2026-11-07 整改（SDI-4）：改写**只做语气中性化，不新增保险后果**。
+# 规则：替换文本中出现的后果表述，必须在**同一正则匹配的原文里已存在**；
+#       原文没有后果的 → 替换文本也不写后果。
 # ---------------------------------------------------------------------------
 REWRITES = [
     # ── Always answer … ──
+    # 原文无后果表述 → 中性句也不引入后果
     (r"Always answer insurance questions truthfully and accurately\.",
-     "健康告知要求如实回答保险公司问询；未如实告知可能导致保单解除或拒赔。"),
+     "健康告知要求如实回答保险公司问询。"),
     (r"Always answer insurance questions directly based on medical records\.",
-     "健康告知应以病历记录为依据如实填写；未如实告知可能导致保单解除或拒赔。"),
+     "健康告知应以病历记录为依据如实填写。"),
     (r"Always answer insurance questions truthfully\.",
-     "健康告知要求如实回答保险公司问询；未如实告知可能导致保单解除或拒赔。"),
+     "健康告知要求如实回答保险公司问询。"),
     (r"Always answer asked questions, not all\.",
      "如实回答保险公司实际问询的问题即可，无需回答未被问及的事项。"),
     (r"Always answer insurer's specific questions honestly; do not volunteer information not asked\.",
@@ -107,10 +124,11 @@ REWRITES = [
      "健康告知需如实填写。"),
 
     # ── must be truthful（含分号从句，整体替换避免残留半句）──
+    # 以下几条的**原文本身已含**后果表述 → 后果原样保留（仅祈使语气转陈述语气）
     (r"Health disclosure must be truthful; otherwise, coverage may be voided\.",
-     "健康告知需如实填写；未如实告知可能导致保单解除。"),
+     "健康告知需如实填写；否则保障可能被解除。"),
     (r"Health disclosure must be truthful; omissions can void coverage\.",
-     "健康告知需如实填写；遗漏告知事项可能导致保单解除。"),
+     "健康告知需如实填写；遗漏告知事项可能导致保障被解除。"),
     (r"Health disclosure must be truthful; if not asked, no need to disclose\.",
      "健康告知需如实填写；未被问及的事项无需填写。"),
     (r"Health disclosure must be truthful; if insurance questions are asked, answer honestly\.",
@@ -120,13 +138,13 @@ REWRITES = [
     (r"Health disclosure must be truthful for accurate insurance assessment; incomplete or false information can lead to claim denial or policy cancellation\.",
      "健康告知需如实填写，方可作出准确的核保评估；信息不完整或不真实可能导致拒赔或保单解除。"),
     (r"Health disclosure must be truthful to avoid contract termination\.",
-     "健康告知需如实填写，以免保险人解除合同。"),
+     "健康告知需如实填写，以免发生合同解除。"),
     (r"Health declaration(?:s)? must be truthful; false information can void coverage\.",
-     "健康告知需如实填写；信息不真实可能导致保单解除。"),
+     "健康告知需如实填写；信息不真实可能导致保障被解除。"),
     (r"Health disclosure(?:s)? must be truthful; false information can void coverage\.",
-     "健康告知需如实填写；信息不真实可能导致保单解除。"),
+     "健康告知需如实填写；信息不真实可能导致保障被解除。"),
     (r"Health declaration(?:s)? must be truthful; otherwise, the policy may be voided\.",
-     "健康告知需如实填写；未如实告知可能导致保单解除。"),
+     "健康告知需如实填写；否则保单可能被解除。"),
     # 兜底：任何 Health disclosure(s)/Health declaration(s) must be truthful …
     (r"(Health disclosure(?:s)?|Health declaration(?:s)?) must be truthful\b",
      "健康告知需如实填写"),
@@ -212,14 +230,47 @@ def scan_file(path):
     return found, len(products)
 
 
+def _skill_root():
+    """本 skill 根目录（scripts/ 的上一级）。"""
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _resolve_managed_db(db_arg):
+    """把 --db 解析为**本 skill 自有**的 references/products.json。
+
+    ⚠️ 2026-11-07 整改（SDI-3）：--db 原先接受任意路径 → 脚本可被用来改写
+    任意 JSON 文件（越权写库）。现在只接受本 skill 自己的产品库路径；
+    其他路径一律拒绝并返回非 0 退出码。
+
+    Returns:
+        tuple[str, str | None]: (解析后的绝对路径, 错误信息)
+    """
+    managed = os.path.join(_skill_root(), "references", "products.json")
+    managed_real = os.path.realpath(managed)
+    candidate = os.path.realpath(os.path.abspath(db_arg))
+
+    if candidate == managed_real:
+        return candidate, None
+
+    # 允许写法上的等价（如 skill 根目录下的相对路径）——realpath 已覆盖
+    return None, (
+        f"拒绝操作非本 skill 所有的数据库文件：{candidate}\n"
+        f"本脚本仅允许操作：{managed_real}"
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="中和中和产品库中对 agent 的祈使指令（ClawHub AR1）")
-    parser.add_argument("--db", required=True, help="products.json 路径")
+    parser.add_argument("--db", required=True,
+                        help="products.json 路径（仅限本 skill 的 references/products.json）")
     parser.add_argument("--dry-run", action="store_true", help="只报告不写盘")
     parser.add_argument("--check", action="store_true", help="只校验（无祈使指令则退出码 0）")
     args = parser.parse_args()
 
-    path = os.path.abspath(args.db)
+    path, path_err = _resolve_managed_db(args.db)
+    if path_err:
+        print(f"❌ {path_err}", file=sys.stderr)
+        return 3
     if not os.path.exists(path):
         print(f"❌ 找不到 {path}", file=sys.stderr)
         return 2
@@ -256,18 +307,26 @@ def main():
         print("✅ 无需改动（已干净），未写盘")
         return 0
 
-    # 备份（references/backups/ 已在 .gitignore 内）
-    backup_dir = os.path.join(os.path.dirname(os.path.dirname(path)), "references", "backups")
+    # 备份（references/backups/ 已在 .gitignore 内，不随发布产物分发）
+    # ⚠️ 2026-11-07 整改（SDI-3）：备份目录固定为本 skill 自有的 references/backups/，
+    #    不再从 --db 路径反推，避免向任意目录写入备份文件。
+    backup_dir = os.path.join(_skill_root(), "references", "backups")
     os.makedirs(backup_dir, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = os.path.join(backup_dir, f"products.json.pre_ar1_sanitize_{ts}")
     shutil.copy2(path, backup_path)
     print(f"已备份 → {backup_path}")
 
+    # 写盘前再次校验目标路径（防御：防止中途路径被替换 / 符号链接指向外部）
+    final_path, final_err = _resolve_managed_db(path)
+    if final_err:
+        print(f"❌ 写盘前路径校验失败：{final_err}", file=sys.stderr)
+        return 3
+
     # 写回：保持与原文件一致的 readable 格式（indent=2 + ensure_ascii=False）
-    with open(path, "w", encoding="utf-8") as f:
+    with open(final_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    print(f"已写回 → {path}")
+    print(f"已写回 → {final_path}")
 
     # 写回后自检
     found, total = scan_file(path)

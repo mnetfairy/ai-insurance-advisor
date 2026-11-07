@@ -1,0 +1,21 @@
+# .clawhubignore — ClawHub 发布产物收敛（ClawHub 安全审计整改 2026-11-07）
+#
+# 本文件中的路径不随 skill 发布产物分发（本地文件保留，维护链路照常可用）。
+#
+# 排除原因：
+#   - sanitize_products_json.py : 本地数据维护工具（改写产品库自由文本字段）。
+#                                  运行时不需要、发布产物中不应暴露写入能力。
+#   - test_*.py                 : 本地回归测试脚本。包含未在公开 description 中披露的
+#                                  内部断言与绝对路径依赖，不属于运行时能力面。
+#
+# ⚠️ 运行时白名单仅 3 个脚本：
+#      scripts/needs_analyzer.py
+#      scripts/premium_calculator.py
+#      scripts/plan_designer.py
+
+scripts/sanitize_products_json.py
+scripts/test_budget_compliance.py
+scripts/test_data_hygiene.py
+scripts/test_discontinued_filter.py
+scripts/test_insurance_recommendations.py
+scripts/test_audit_remediation.py
