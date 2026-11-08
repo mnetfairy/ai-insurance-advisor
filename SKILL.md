@@ -1,7 +1,7 @@
 ---
 name: ai-insurance-advisor
 description: 中国大陆保险顾问。本 skill 覆盖 8 项能力：保险需求分析（needs_analyzer.py）、产品对比（premium_calculator.py + 本地 products.json）、保费计算（premium_calculator.py）、方案设计（plan_designer.py）、保险知识问答（insurance-knowledge.md）、合规要点提示（compliance.md）、朋友圈/社交营销文案生成（agent LLM 生成，无专属脚本）、培训话术支持（agent LLM 生成，无专属脚本）。不提供核保预审、理赔代办、代理人展业工具等能力——这些场景请转人工或调用专业服务。发布产物仅含 SKILL.md + 3 个只读参考文件 + 3 个运行时脚本（needs_analyzer / premium_calculator / plan_designer）；数据清洗与回归测试脚本为本地维护工具，不随发布产物分发。
-version: 2.3.5
+version: 2.3.6
 tags: insurance, china, financial, advisor, product-comparison, medical, family-protection, health
 last_published: 2026-11-08
 allowed-tools:
@@ -585,7 +585,7 @@ fallback 三件套 / SKILL.md 引用 / 🔒 默认隐藏），防止后续整改
 > 另 8 条从类别分布可推断同为 AR1（17 条中 8 条被截断）与同类项。
 > 本节供后续审计逐条比对 / grep。
 
-### 根因与修法总览（33 findings → 6 类根因 + 1 项官方 ClawScan concern）
+### 根因与修法总览（33 findings → 6 类根因 + 2 项官方 ClawScan concern）
 
 | 编号 | 数量 | 严重度 | 根因 | 修法 |
 |---|---|---|---|---|
@@ -596,6 +596,7 @@ fallback 三件套 / SKILL.md 引用 / 🔒 默认隐藏），防止后续整改
 | **R5** SDI-4 Excessive Agency | 1 | MEDIUM | `load_products()` 漏 `is_duplicate` 过滤 → 报价池混入重复品且与 `eligible_products` 口径不一致 | 新增 `is_eligible_for_pool()` 单一资格谓词，加载与统计**共用** |
 | **R6** SDI-3 + SDI-4 | 2 | MEDIUM | 清洗脚本**越权写库** + 改写时**新增保险后果** | ①移出发布产物 ②改写只做语气中性化、**不新增法律后果** ③`--db` 限制为本 skill 的 `references/products.json` 且写盘前校验 |
 | **R7** SDI-4（官方 ClawScan 唯一 `concern`） | 1 | MEDIUM | `_enforce_budget()` 的 coverage_downscale 分支改了 `entry["coverage"]` 却**漏减** `total_coverage` → 总保额虚报 | ①downscale 分支同步扣减 ②`_finalize_plan()` 出口按 `products` 重算兜底 ③`description` 按实际剩余险种动态生成 |
+| **R8** SDI-4（官方 ClawScan `purpose_capability` concern 的**另一条**） | 1 | HIGH | `plan_designer` 三套方案**写死**保额（`min(annual_income*5, 3000000)` / `1000000` / `2000000`），**从不检查产品 `max_coverage`**；`_coverage_floor()` 只处理下限 | 新增 `_coverage_cap()` / `_apply_coverage_cap()`：**所有险种**保额被该产品 `max_coverage` 夹住（`coverage_unit=="万元"` → ×10000）；触顶写入 `budget_adjustments.coverage_capped`；`max_coverage` 缺失则**不设上限**（不虚构上限） |
 
 ### 各项修法明细
 
@@ -680,9 +681,35 @@ fallback 三件套 / SKILL.md 引用 / 🔒 默认隐藏），防止后续整改
   `total_coverage == sum(products[].coverage)` **全部为 True**；
   极小预算下描述自动收敛为实际险种（如「保障基础，含定期寿险，适合大多数家庭」）。
 
+**R8（1 项，HIGH）— 意外险保额超目录上限（官方 ClawScan `purpose_capability` concern 的另一条）**
+
+> 依据：主库姊妹 skill `insurance-advisor-china` 的官方扫描报告（63 findings）中，
+> `clawscan.json` 的 `purpose_capability` 维度同样点了这条：
+>
+> > the example profile receives 2.5 million yuan of accident coverage for a product
+> > whose catalog maximum is 500,000 yuan.
+
+- **根因**：`plan_designer` 三套方案**写死**保额，**从不检查产品 `max_coverage`**；
+  `_coverage_floor()` 只处理下限（`min_coverage`），**没有上限概念**。
+- **实测复现（整改前）**：`安心少儿意外险` 产品 `max_coverage=50`（万元，即上限 500,000 元），
+  但基础版输出 `coverage=2,500,000` → **超上限 50 倍**（对外虚报可售保额）。
+- **修法**：从主库已验证实现中**外科式移植** `_coverage_cap()` / `_apply_coverage_cap()`：
+  - **所有险种**（定期寿险 / 重疾险 / 医疗险 / 意外险 / 储蓄险）的保额均被该产品 `max_coverage` 夹住
+    （`coverage_unit=="万元"` → ×10000）；`max_coverage` 缺失 → **不设上限**（不虚构上限）
+  - 触顶时写入 `budget_adjustments.coverage_capped` 审计记录
+- **验证**：修复前 4 处超限 → 修复后 **0 处**
+  | 方案 | 险种 | before | after | 上限 |
+  |---|---|---|---|---|
+  | 基础版 | 意外险 安心少儿意外险 | 2,500,000 | **500,000** | 500,000 |
+  | 标准版 | 定期寿险 华贵大麦 | 2,000,000 | **500,000** | 500,000 |
+  | 全面版 | 定期寿险 华贵大麦 | 2,000,000 | **500,000** | 500,000 |
+  | 全面版 | 医疗险 平安E生保 | 6,000,000 | **4,000,000** | 4,000,000 |
+- ⚠️ **本 skill 原有修复全部保留**：R4 续保派生、R5 重复品谓词、R6/R7 出口兜底与描述动态生成
+  **未被覆盖**（采用片段移植而非整文件覆盖）。
+
 ### 🧪 本轮新增回归测试
 
-新增 `scripts/test_audit_remediation.py`（**65 项**，本地维护工具，不随发布产物分发）：
+新增 `scripts/test_audit_remediation.py`（**72 项**，本地维护工具，不随发布产物分发）：
 - **R3**（10 项）：正文独立 `---` 数量、`indexOf("\n---", 3)` 命中 frontmatter 结束符、
   ClawHub 同款解析逻辑能解出 `permissions` 与 `allowed-tools`、write 为空、exec 白名单仅 3 个
 - **R4**（16 项）：全部医疗险派生字段与真实字段一致；**兜底产品**用例（6 年保证续保）；
@@ -710,6 +737,22 @@ fallback 三件套 / SKILL.md 引用 / 🔒 默认隐藏），防止后续整改
 ***
 
 ## 更新日志
+
+- v2.3.6 (2026-11-08)：**R8 意外险保额超目录上限修复**（同步自主库 `insurance-advisor-china`）：
+  - ⚠️ 本版**代码逻辑变更**，非仅文档：方案保额不再超出产品目录上限
+  - **R8（HIGH）**：新增 `_coverage_cap()` / `_apply_coverage_cap()` →
+    **所有险种**保额被该产品 `max_coverage` 夹住（万元 → ×10000）；`max_coverage` 缺失则不设上限；
+    触顶写 `budget_adjustments.coverage_capped`
+  - 实测：修复前 **4 处超限** → 修复后 **0 处**
+    （基础版意外险 2,500,000 → 500,000；标准/全面版定期寿险 2,000,000 → 500,000；
+    全面版医疗险 6,000,000 → 4,000,000）
+  - ⚠️ 本 skill 原有的 R4 续保派生 / R5 重复品谓词 / R6-R7 出口兜底与描述动态生成**均保留**
+    （片段移植，非整文件覆盖）
+  - **测试**：`test_audit_remediation.py` 65 → **72 项**（+7 条 R4 保额上限断言）→ 72/72 PASS；
+    `test_insurance_recommendations` 7/7 · `test_budget_compliance` 192/192 · `test_discontinued_filter` 13/13
+  - **红线**：`references/products.json` 未被本次改动触碰（其当前内容为主库同步产物）；
+    `test_insurance_recommendations.py` / `test_budget_compliance.py` 未修改；
+    400 电话仍为**🔒 默认隐藏**策略（与主库的「直接展示」策略各自保持现状）
 
 - v2.3.5 (2026-11-07)：**ClawHub 安全审计 33 项 finding 整改**（TP4 ×3 / AR1 ×17 / LP3 ×1 / SDI-3 ×1 / SDI-4 ×3）
   （scanner 2.12.0 · issueCount=33 · score=100 · severity=CRITICAL · recommendation=DO_NOT_INSTALL）

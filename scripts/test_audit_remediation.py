@@ -23,6 +23,12 @@ test_audit_remediation.py — ClawHub 安全审计整改回归测试（2026-11-0
    - `load_products()` 返回的报价池中不得出现 `is_duplicate is True` 的产品。
    - `stats.eligible_products` 必须等于 `len(load_products())`（两处口径不再漂移）。
 
+4. **R4 · 保额超产品可售上限（官方 ClawScan 唯一 concern 点名的第一条）**
+   - 三套方案各险种的 `coverage` 不得超过该产品在产品库的 `max_coverage`
+     （可售保额上限，单位万元→元）。
+   - 触顶时必须在 `budget_adjustments` 记 `coverage_capped`（留痕可审计）。
+   - `_coverage_cap()` 语义：无 `max_coverage` → 不设上限（不得假装有上限）。
+
 用法：
     python3 scripts/test_audit_remediation.py
 退出码 0 = 全部通过。
@@ -510,6 +516,129 @@ def test_r7_coverage_accounting(pd):
           "未找到 old_coverage - best 的同步扣减赋值")
 
 
+# ---------------------------------------------------------------------------
+# R4 — 保额上限回归（官方 ClawScan point-of-concern #1）
+#
+# 根因：plan_designer.py 三套方案（基础版/标准版/全面版）的各险种保额
+#       （意外险 / 重疾险 / 定期寿险 / 医疗险 / 储蓄险）均为**写死值或收入倍数**，
+#       未经产品库 max_coverage（可售保额上限）夹逼 →
+#       如「安心少儿意外险」max_coverage=50 万，方案却给 2,500,000 元（超 50 倍），
+#       对外虚报可售保额。
+# 修法：_coverage_cap() 取产品 max_coverage（万元→元）作为上限，
+#       _apply_coverage_cap() 把期望保额夹到上限并在 budget_adjustments
+#       记 coverage_capped（留痕）。
+# ---------------------------------------------------------------------------
+
+# 覆盖收入/预算档位（含常规档与极小预算档，触发 downscale 后仍不得超上限）
+_COVERAGE_CAP_CASES = [
+    (500000, 50000),
+    (300000, 30000),
+    (1000000, 200000),
+    (80000, 10000),
+]
+
+
+def _product_cap(product):
+    """按产品库规则换算可售保额上限（元）；无 max_coverage → None（不设上限）。"""
+    if not product:
+        return None
+    raw = product.get("max_coverage")
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    unit = product.get("coverage_unit") or "万元"
+    if unit == "万元":
+        value = value * 10000
+    return int(value)
+
+
+def test_r4_coverage_cap(pd):
+    """R4: 方案保额不得超过产品库 max_coverage（可售保额上限）。"""
+    print("\nR4: 各险种保额 ≤ 产品 max_coverage（可售保额上限）")
+
+    products = pd.load_products()
+    index = {(p.get("type"), p.get("name")): p for p in products}
+
+    # --- R4.1 三套方案每个险种的 coverage 不得超过该产品 max_coverage ---
+    violations = []
+    checked = 0
+    for income, budget in _COVERAGE_CAP_CASES:
+        plans = pd.generate_all_plans(
+            35, "男", income, budget,
+            {"death": 2000000, "critical_illness": 1500000, "hospital": 4000000},
+        )
+        for name, plan in plans.items():
+            for entry in (plan.get("products") or []):
+                product = index.get((entry.get("type"), entry.get("product_name")))
+                cap = _product_cap(product)
+                if cap is None:
+                    continue
+                checked += 1
+                coverage = entry.get("coverage") or 0
+                if coverage > cap:
+                    violations.append(
+                        f"收入{income}/预算{budget} {name} {entry.get('type')}"
+                        f"「{entry.get('product_name')}」coverage={coverage} > 上限={cap}"
+                        f"（max_coverage={product.get('max_coverage')} "
+                        f"{product.get('coverage_unit')}）")
+    check("R4.1 三套方案各险种 coverage ≤ 产品 max_coverage",
+          not violations,
+          "; ".join(violations[:3]) if violations else
+          f"覆盖 {len(_COVERAGE_CAP_CASES)} 个收入/预算档 × 3 套方案，受检 {checked} 条保额记录")
+
+    # --- R4.2 触顶时必须在 budget_adjustments 留痕（coverage_capped） ---
+    plans = pd.generate_all_plans(
+        35, "男", 500000, 50000,
+        {"death": 2000000, "critical_illness": 1500000, "hospital": 4000000},
+    )
+    capped_records = []
+    unrecorded = []
+    for name, plan in plans.items():
+        for adj in (plan.get("budget_adjustments") or []):
+            if adj.get("type") == "coverage_capped":
+                capped_records.append(adj)
+                if adj.get("capped_to") is None or adj.get("requested_coverage") is None:
+                    unrecorded.append(f"{name}: coverage_capped 记录字段缺失")
+                elif adj["capped_to"] >= adj["requested_coverage"]:
+                    unrecorded.append(
+                        f"{name}: capped_to({adj['capped_to']}) 未小于 requested_coverage"
+                        f"({adj['requested_coverage']})")
+    check("R4.2 触顶时写入 budget_adjustments / coverage_capped",
+          bool(capped_records) and not unrecorded,
+          "; ".join(unrecorded[:3]) if unrecorded else
+          f"共 {len(capped_records)} 条 coverage_capped 记录："
+          + ", ".join(f"{a.get('product_type')} {a.get('product')}"
+                      f" {a.get('requested_coverage')}→{a.get('capped_to')}"
+                      for a in capped_records[:3]))
+
+    # --- R4.3 上限函数语义：无 max_coverage → 不设上限；万元 → 元 ---
+    check("R4.3 _coverage_cap 无 max_coverage 时返回 None（不设上限）",
+          getattr(pd, "_coverage_cap", lambda _p: 0)({"name": "X"}) is None)
+    check("R4.3 _coverage_cap 万元单位换算 ×10000",
+          getattr(pd, "_coverage_cap", lambda _p: 0)(
+              {"max_coverage": 50, "coverage_unit": "万元"}) == 500000,
+          "max_coverage=50 万元 应得 500000 元")
+    check("R4.3 _coverage_cap 元单位不换算",
+          getattr(pd, "_coverage_cap", lambda _p: 0)(
+              {"max_coverage": 500000, "coverage_unit": "元"}) == 500000,
+          "max_coverage=500000 元 应得 500000 元")
+
+    # --- R4.4 源码级断言：helper 与各方案上限夹逼已就位 ---
+    src = open(os.path.join(SKILL_DIR, "scripts", "plan_designer.py"),
+               "r", encoding="utf-8").read()
+    check("R4.4 源码含 _coverage_cap / _apply_coverage_cap helper",
+          "def _coverage_cap(" in src and "def _apply_coverage_cap(" in src,
+          "未找到 helper 定义")
+    check("R4.4 三套方案均已接入上限夹逼",
+          src.count("_apply_coverage_cap(") >= 13,
+          f"_apply_coverage_cap 调用/定义计数 = {src.count('_apply_coverage_cap(')}（≥13）")
+
+
 def main():
     print("=" * 70)
     print("ClawHub 安全审计整改回归测试（2026-11-07）")
@@ -525,6 +654,7 @@ def main():
     test_r5_duplicate_filter(pc)
     test_r6_sanitizer(san)
     test_r7_coverage_accounting(pd)
+    test_r4_coverage_cap(pd)
     test_r1_r2_publish_surface()
     test_a_400_redline()
 

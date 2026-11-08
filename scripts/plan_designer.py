@@ -370,6 +370,57 @@ def _coverage_floor(product, entry):
     return min(floor, current)
 
 
+def _coverage_cap(product):
+    """保额上限：产品 max_coverage（单位万元→元）；无 max_coverage 时返回 None（不设上限）。
+
+    ⚠️ R4 整改 2026-11-08（同步自 insurance-advisor-china 主库）：
+    产品库中 max_coverage 是**可售保额上限**，
+    如「安心少儿意外险」max_coverage=50（万元）= 500,000 元，
+    方案原写死 2,500,000 元 → 超上限 50 倍（对外虚报可售保额）。
+    `coverage_unit` 为「万元」时 ×10000；其他单位（缺省视为元）不换算。
+    max_coverage 缺失（None / 非数值）→ 返回 None，**不设上限**，
+    调用方须如实标注「该产品未提供可售保额上限」，不得假装有上限。
+    """
+    if not product:
+        return None
+    raw = product.get("max_coverage")
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    unit = product.get("coverage_unit") or "万元"
+    if unit == "万元":
+        value = value * 10000
+    return int(value)
+
+
+def _apply_coverage_cap(plan, product, desired_coverage, entry_type=None, entry_name=None):
+    """把期望保额夹到产品 max_coverage 上限；触顶时写入 budget_adjustments。
+
+    Returns:
+        tuple[int, bool]: (最终保额, 是否因上限而被下调)
+    """
+    cap = _coverage_cap(product)
+    desired = int(desired_coverage or 0)
+    if cap is None or desired <= cap:
+        return desired, False
+    plan.setdefault("budget_adjustments", []).append({
+        "type": "coverage_capped",
+        "product": entry_name,
+        "product_type": entry_type,
+        "requested_coverage": desired,
+        "capped_to": cap,
+        "max_coverage": product.get("max_coverage"),
+        "coverage_unit": product.get("coverage_unit"),
+        "reason": "方案保额超过该产品在产品库的可售保额上限（max_coverage），已按上限下调",
+    })
+    return cap, True
+
+
 def _refresh_coverage_text(entry, from_coverage, to_coverage):
     """保额变化后同步 key_benefits 中内嵌的保额数字。
 
@@ -736,6 +787,9 @@ def design_basic_plan(age, gender, annual_income, annual_budget, coverage_needs,
         return _finalize_plan(plan, budget, annual_income, 0.10, age, gender, products)
     tl_product = min(tl_products, key=lambda x: x.get("premium_per_10k", 999))
     tl_coverage = min(coverage_needs.get("death", 500000), 1000000)
+    # ⚠️ R4 整改 2026-11-08：保额不得超产品可售上限（max_coverage）
+    tl_coverage, _capped = _apply_coverage_cap(
+        plan, tl_product, tl_coverage, "定期寿险", tl_product.get("name"))
     tl_premium = calculate_product_premium(tl_product, age, gender, tl_coverage, "20年")
     if plan["annual_premium"] + tl_premium <= budget:
         plan["products"].append({
@@ -756,6 +810,10 @@ def design_basic_plan(age, gender, annual_income, annual_budget, coverage_needs,
     if ac_products:
         ac_product = min(ac_products, key=lambda x: x.get("premium_per_10k", 999))
         ac_coverage = min(annual_income * 5, 3000000)
+        # ⚠️ R4 整改 2026-11-08：意外险保额夹到产品 max_coverage
+        #    （如「安心少儿意外险」max_coverage=50 万 → 上限 500,000 元）
+        ac_coverage, _capped = _apply_coverage_cap(
+            plan, ac_product, ac_coverage, "意外险", ac_product.get("name"))
         ac_premium = calculate_product_premium(ac_product, age, gender, ac_coverage, "年交")
         if plan["annual_premium"] + ac_premium <= budget:
             plan["products"].append({
@@ -777,6 +835,8 @@ def design_basic_plan(age, gender, annual_income, annual_budget, coverage_needs,
     mi_product, mi_limitation = select_medical_product(products, min_guaranteed_years=None)
     if mi_product:
         mi_coverage = 2000000
+        mi_coverage, _capped = _apply_coverage_cap(
+            plan, mi_product, mi_coverage, "医疗险", mi_product.get("name"))
         mi_premium = calculate_product_premium(mi_product, age, gender, mi_coverage, "年交")
         if plan["annual_premium"] + mi_premium <= budget:
             mi_coverage_period = derive_medical_coverage_period(mi_product)
@@ -831,6 +891,9 @@ def design_standard_plan(age, gender, annual_income, annual_budget, coverage_nee
         return _finalize_plan(plan, budget, annual_income, 0.15, age, gender, products)
     tl_product = next((p for p in tl_products if "星" in p["name"]), tl_products[0])
     tl_coverage = min(coverage_needs.get("death", 1000000), 2000000)
+    # ⚠️ R4 整改 2026-11-08：保额不得超产品可售上限（max_coverage）
+    tl_coverage, _capped = _apply_coverage_cap(
+        plan, tl_product, tl_coverage, "定期寿险", tl_product.get("name"))
     tl_premium = calculate_product_premium(tl_product, age, gender, tl_coverage, "20年")
     plan["products"].append({
         "type": "定期寿险",
@@ -850,6 +913,9 @@ def design_standard_plan(age, gender, annual_income, annual_budget, coverage_nee
     if crx_products:
         crx_product = next((p for p in crx_products if "福" in p["name"] and "终身" in (p.get("coverage_period") or "")), crx_products[0])
         crx_coverage = min(coverage_needs.get("critical_illness", annual_income * 3), 500000)
+        # ⚠️ R4 整改 2026-11-08：保额不得超产品可售上限（max_coverage）
+        crx_coverage, _capped = _apply_coverage_cap(
+            plan, crx_product, crx_coverage, "重疾险", crx_product.get("name"))
         crx_premium = calculate_product_premium(crx_product, age, gender, crx_coverage, "20年")
         plan["products"].append({
             "type": "重疾险",
@@ -868,6 +934,8 @@ def design_standard_plan(age, gender, annual_income, annual_budget, coverage_nee
     mi_product, mi_limitation = select_medical_product(products, min_guaranteed_years=20)
     if mi_product:
         mi_coverage = 4000000
+        mi_coverage, _capped = _apply_coverage_cap(
+            plan, mi_product, mi_coverage, "医疗险", mi_product.get("name"))
         mi_premium = calculate_product_premium(mi_product, age, gender, mi_coverage, "年交")
         mi_coverage_period = derive_medical_coverage_period(mi_product)
         plan["products"].append({
@@ -899,6 +967,9 @@ def design_standard_plan(age, gender, annual_income, annual_budget, coverage_nee
     if ac_products:
         ac_product = next((p for p in ac_products if "百万" in p["name"]), ac_products[0])
         ac_coverage = min(annual_income * 5, 3000000)
+        # ⚠️ R4 整改 2026-11-08：意外险保额夹到产品 max_coverage
+        ac_coverage, _capped = _apply_coverage_cap(
+            plan, ac_product, ac_coverage, "意外险", ac_product.get("name"))
         ac_premium = calculate_product_premium(ac_product, age, gender, ac_coverage, "年交")
         plan["products"].append({
             "type": "意外险",
@@ -948,6 +1019,9 @@ def design_premium_plan(age, gender, annual_income, annual_budget, coverage_need
         return _finalize_plan(plan, budget, annual_income, 0.20, age, gender, products)
     tl_product = tl_products[0]
     tl_coverage = min(coverage_needs.get("death", 2000000), 5000000)
+    # ⚠️ R4 整改 2026-11-08：保额不得超产品可售上限（max_coverage）
+    tl_coverage, _capped = _apply_coverage_cap(
+        plan, tl_product, tl_coverage, "定期寿险", tl_product.get("name"))
     tl_premium = calculate_product_premium(tl_product, age, gender, tl_coverage, "20年")
     plan["products"].append({
         "type": "定期寿险",
@@ -969,6 +1043,9 @@ def design_premium_plan(age, gender, annual_income, annual_budget, coverage_need
     if crx_products:
         crx_product = crx_products[0]
         crx_coverage = min(coverage_needs.get("critical_illness", annual_income * 5), 500000)
+        # ⚠️ R4 整改 2026-11-08：保额不得超产品可售上限（max_coverage）
+        crx_coverage, _capped = _apply_coverage_cap(
+            plan, crx_product, crx_coverage, "重疾险", crx_product.get("name"))
         crx_premium = calculate_product_premium(crx_product, age, gender, crx_coverage, "20年")
         plan["products"].append({
             "type": "重疾险",
@@ -993,6 +1070,8 @@ def design_premium_plan(age, gender, annual_income, annual_budget, coverage_need
         products, min_guaranteed_years=None, prefer=_prefer_600w)
     if mi_product:
         mi_coverage = 6000000
+        mi_coverage, _capped = _apply_coverage_cap(
+            plan, mi_product, mi_coverage, "医疗险", mi_product.get("name"))
         mi_premium = calculate_product_premium(mi_product, age, gender, mi_coverage, "年交")
         mi_coverage_period = derive_medical_coverage_period(mi_product)
         plan["products"].append({
@@ -1023,6 +1102,9 @@ def design_premium_plan(age, gender, annual_income, annual_budget, coverage_need
     if ac_products:
         ac_product = next((p for p in ac_products if "百万" in p["name"]), ac_products[0])
         ac_coverage = 1000000
+        # ⚠️ R4 整改 2026-11-08：意外险保额夹到产品 max_coverage
+        ac_coverage, _capped = _apply_coverage_cap(
+            plan, ac_product, ac_coverage, "意外险", ac_product.get("name"))
         ac_premium = calculate_product_premium(ac_product, age, gender, ac_coverage, "年交")
         plan["products"].append({
             "type": "意外险",
@@ -1045,6 +1127,9 @@ def design_premium_plan(age, gender, annual_income, annual_budget, coverage_need
         if sa_products and plan["annual_premium"] + 10000 <= budget:
             sa_product = sa_products[0]
             sa_coverage = 100000
+            # ⚠️ R4 整改 2026-11-08：保额不得超产品可售上限（max_coverage）
+            sa_coverage, _capped = _apply_coverage_cap(
+                plan, sa_product, sa_coverage, "储蓄险", sa_product.get("name"))
             sa_premium = calculate_product_premium(sa_product, age, gender, sa_coverage, "10年")
             plan["products"].append({
                 "type": "储蓄险",
