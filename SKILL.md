@@ -1,9 +1,9 @@
 ---
 name: ai-insurance-advisor
 description: 中国大陆保险顾问。本 skill 覆盖 8 项能力：保险需求分析（needs_analyzer.py）、产品对比（premium_calculator.py + 本地 products.json）、保费计算（premium_calculator.py）、方案设计（plan_designer.py）、保险知识问答（insurance-knowledge.md）、合规要点提示（compliance.md）、朋友圈/社交营销文案生成（agent LLM 生成，无专属脚本）、培训话术支持（agent LLM 生成，无专属脚本）。不提供核保预审、理赔代办、代理人展业工具等能力——这些场景请转人工或调用专业服务。发布产物仅含 SKILL.md + 3 个只读参考文件 + 3 个运行时脚本（needs_analyzer / premium_calculator / plan_designer）；数据清洗与回归测试脚本为本地维护工具，不随发布产物分发。
-version: 2.3.7
+version: 2.3.8
 tags: insurance, china, financial, advisor, product-comparison, medical, family-protection, health
-last_published: 2026-11-09
+last_published: 2026-11-10
 allowed-tools:
   - read
   - exec
@@ -231,7 +231,7 @@ python3 scripts/needs_analyzer.py
 **执行方式**：
 - 读取 `references/insurance-knowledge.md`
 - 根据用户问题匹配相关章节
-- 用中文清晰解释
+- 用中文清晰解释（用户明确要求其他语言时，按用户指定的语言输出）
 
 **知识覆盖范围**：
 - 五大险种定义与功能
@@ -429,7 +429,7 @@ echo '{"age":35,"gender":"男","annual_income":500000,"annual_budget":500000,"co
 3. 产品数据为静态参考数据，实际保费以保险公司正式测算为准
 4. 方案设计结果仅供参考，最终方案需结合客户实际情况调整
 5. 合规提示不能替代专业法律意见
-6. 所有输出内容使用中文
+6. 输出语言：默认使用中文；当用户明确要求其他语言时，按用户指定的语言输出（保险条款名称、产品名称、监管机构名称保留原文）
 7. **规范一/二/三均为强制要求**：规范一/二适用于所有产品推荐场景；规范三为本 skill 的核心差异化功能，必须在每次产品推荐/方案设计后主动呈现（默认隐藏联系方式，用户同意后展示完整电话）
 
 ***
@@ -481,6 +481,11 @@ SKILL_DIR/
 - ❌ 不修改任何源文件、不重写产品数据、不创建备份
 - ❌ 不发起任何网络请求、不连接任何外部服务（核保/理赔/营销/培训系统皆未接入）
 - ❌ 不读取、不外传任何凭据或环境变量
+- ✅ **保额上限如实披露**：`plan_designer.py` 只按产品库 `max_coverage`（可售保额上限）夹逼保额；
+  当某险种的**可售保额上限未知/不可信**（产品库未提供 `max_coverage`、或保额单位不可信）时，
+  **不虚构上限**，而是写入 `budget_adjustments.coverage_cap_unknown` 留痕，
+  并在最终输出的 `coverage_disclaimers` 中**对外明示**「该险种的建议保额未经可售上限核实，
+  以保险公司正式测算为准」。
 
 > ℹ️ **维护用脚本（非运行时）**：`scripts/sanitize_products_json.py` 用于把产品库中对 agent 的
 > 祈使指令改写为中性陈述（ClawHub AR1 整改），由维护者手动执行，**不在运行时白名单内**，
@@ -603,12 +608,12 @@ fallback 三件套 / SKILL.md 引用 / 🔒 默认隐藏），防止后续整改
 **R1（3 项，HIGH）— 描述与实际行为不符**
 - 新增 `.clawhubignore`：排除 `scripts/sanitize_products_json.py` 与 5 个 `scripts/test_*.py`。
   ⚠️ **不删除本地文件**（维护链路照常可用），只从**发布产物**分发中排除。
-  实测：`clawhub skill publish --dry-run --json` → `fileCount` **13 → 7**。
+  实测：ClawHub 发布预演（只读预览）读取其 `fileCount` 统计 → **13 → 7**。
 - frontmatter `description` 与 `scope` 改为与发布面一致（显式声明维护/测试脚本为本地维护工具）。
-- ⚠️ **不**改 `.gitignore`、**不** `git rm --cached`：维护/测试脚本仍正常纳入 git 版本管理。
-  实测（`git checkout HEAD -- .gitignore` 恢复脚本入索引后）：`clawhub skill publish --dry-run --json`
+- ⚠️ **不改 `.gitignore`、不从 git 索引中移除维护/测试脚本**：维护/测试脚本仍正常纳入 git 版本管理。
+  实测（将 `.gitignore` 恢复为版本库中的原始状态后）：ClawHub 发布预演（只读预览）
   仍为 `fileCount: 7` —— 排除**只**由 `.clawhubignore` 决定，与 git 索引无关。
-  （ClawHub CLI 上传的是**目录内容**，不走 `git ls-files`。）
+  （ClawHub CLI 上传的是**目录内容**，不依据 git 的文件清单。）
 
 **R2（17 项，HIGH）— Anti-Refusal**
 - 主源（`sanitize_products_json.py` / `test_data_hygiene.py`）移出发布产物 → 扫描器不可见。
@@ -737,6 +742,48 @@ fallback 三件套 / SKILL.md 引用 / 🔒 默认隐藏），防止后续整改
 ***
 
 ## 更新日志
+
+- v2.3.8 (2026-11-09)：**ClawHub 安全审计 F1–F4 整改**（Tool Misuse / Output Handling / Excessive Agency ×2）
+  - ⚠️ **400 电话优先推荐功能零改动**（本次整改**未触及**规范三与 400 电话优先推荐的任何逻辑、
+    token 或表述；详见上方「🔴 400 电话优先推荐（红线，功能零改动）」）
+  - ⚠️ **零数据变更**：`references/products.json` **零字节改动**（两库 md5 一致，
+    仅每日流水线的 `_meta` 时间戳/计数变动，非本次改动）；`scripts/test_insurance_recommendations.py` **未修改**
+  - **F1（Tool Misuse）**：整改记录表中的裸命令字面量改为**描述性表述**
+    （“从 git 索引中移除维护/测试脚本”、“将 `.gitignore` 恢复为版本库中的原始状态后”、
+    “ClawHub 发布预演（只读预览）并读取其 `fileCount` 统计”）——
+    **纯文档层改动**：`.gitignore`、`.clawhubignore`、git 索引均**未动**
+  - **F2（Output Handling）**：输出语言规则由「强制全部中文」改为「输出语言：**默认**使用中文；
+    **当用户明确要求其他语言时，按用户指定的语言输出**」（保险条款名称、产品名称、
+    监管机构名称保留原文）—— 保留大陆保险顾问的默认中文定位，同时给出用户 opt-in 例外
+  - **F3（Excessive Agency，置信度 99%）**：修正 `_coverage_cap()` 的 docstring
+    —— 原 docstring 写「其他单位（缺省视为元）不换算」而实现按**万元** ×10000，
+    **文档与实现相反**；现文档与实现严格一致（缺省单位语义改为显式口径），
+    并新增 `_coverage_cap_status()`：
+    **`max_coverage` 有值但 `coverage_unit` 缺失时不再静默按万元换算**
+    （既不按万也不按元猜单位 → 不设上限，标为 `unit_untrusted`）
+    ⚠️ 实测产品库中「`max_coverage` 有值但缺单位」的记录数为 **0**（2266 条有值记录
+    的 `coverage_unit` 全为「万元」）→ **对现有 2267 条记录的换算结果零影响**
+  - **F4（Excessive Agency，置信度 98%）**：`_apply_coverage_cap()` 在上限未知
+    （`cap is None`）时**不再静默放行** → 写入 `budget_adjustments.coverage_cap_unknown`
+    留痕（产品 / 险种 / 请求保额 / `cap_status` / 原因）；
+    `_finalize_plan()` 出口汇总为顶层 **`coverage_disclaimers`**，
+    对外明示「N 个险种的可售保额上限未在产品库中核实，请以保险公司正式测算为准」
+    —— 该披露**真实出现在最终 JSON 输出**中
+  - **代码改动范围**：**只改** `scripts/plan_designer.py` 的保额上限处理
+    （`_coverage_cap_status` / `_coverage_cap` / `_apply_coverage_cap` /
+    `_build_coverage_disclaimers` / `_finalize_plan` 出口）；
+    **未改**：保费计算公式、需求分析口径、产品选品逻辑、预算硬约束与降保额/移除险种逻辑、
+    `total_coverage` 出口重算、`coverage_capped` 触顶记录（逻辑原样保留）
+  - **两库同步**：`scripts/plan_designer.py` 的上述改动**同步至 china 主库**
+    （`insurance-advisor-china`），两库逻辑保持一致（仅 docstring 出处注释不同）；
+    SKILL.md 文档层各自独立（两库本就是不同文档）
+  - **测试**：`scripts/test_audit_remediation.py` 72 → **102 项**（新增 F1/F2/F3/F4 共 30 条断言）
+    → 102/102 PASS；`test_insurance_recommendations` 7/7 · `test_budget_compliance` 192/192 ·
+    `test_discontinued_filter` 13/13 · `test_data_hygiene` 22/22；
+    china 库 `test_audit_remediation` 28/28 PASS
+  - **行为等价性实测**：同一输入（35 岁/男/年收入 50 万/年预算 50 万）改动前后，
+    三套方案的 `total_coverage` / `annual_premium` / 各险种 `coverage` **完全一致**
+    （仅**新增** `coverage_cap_unknown` 留痕与 `coverage_disclaimers` 披露字段）
 
 - v2.3.6 (2026-11-08)：**R8 意外险保额超目录上限修复**（同步自主库 `insurance-advisor-china`）：
   - ⚠️ 本版**代码逻辑变更**，非仅文档：方案保额不再超出产品目录上限
