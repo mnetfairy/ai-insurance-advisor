@@ -1074,6 +1074,158 @@ def test_f5_unit_contract_sdi4(pd):
                 ok24, ok25, ok26, ok27, ok28, ok29])
 
 
+def test_f6_600w_claim_not_misreported(pd):
+    """F6 (SDI-4, ai 2.3.8 官方扫描): 全面版医疗险「600万」不得虚报
+
+    官方扫描原文：
+    「The promised final reconciliation of coverage claims leaves the premium medical plan's
+     hard-coded "600万高保额" unchanged when actual coverage is reduced.」
+    实测：医疗险实际保额 400 万，但 key_benefits 写「600万高保额」、
+    features 写「医疗险600万保额」 → 虚报可售保额。
+    """
+    print("\nTest F6: 医疗险保额声明与实际保额一致（SDI-4）")
+
+    plans = pd.generate_all_plans(
+        35, "男", 500000, 500000,
+        {"death": 2000000, "critical_illness": 1500000, "hospital": 4000000})
+    full = plans.get("全面版") or {}
+    mi = next((e for e in full.get("products", []) if e.get("type") == "医疗险"), None)
+    ok1 = mi is not None
+    check("全面版含医疗险", ok1)
+    if not ok1:
+        return False
+
+    cov = mi.get("coverage")
+    wan = cov // 10000
+    kb = mi.get("key_benefits") or ""
+    feats = full.get("features") or []
+    allok = True
+
+    # ② key_benefits 不得残留「600万」
+    ok2 = ("600万" not in kb)
+    allok = allok and ok2
+    check(f"key_benefits 无「600万」残留（实际 {kb}）", ok2)
+
+    # ③ key_benefits 中的保额数字 == 实际保额
+    ok3 = (f"{wan}万" in kb)
+    allok = allok and ok3
+    check(f"key_benefits 保额 == 实际 {wan}万（实际 {kb}）", ok3)
+
+    # ④ features 中的医疗险条目保额 == 实际保额
+    mi_feats = [f for f in feats if isinstance(f, str) and "医疗险" in f]
+    ok4 = bool(mi_feats) and all(f"{wan}万" in f for f in mi_feats) and \
+        all("600万" not in f for f in mi_feats)
+    allok = allok and ok4
+    check(f"features 医疗险条目保额 == 实际 {wan}万（实际 {mi_feats}）", ok4)
+
+    # ⑤ 通用一致性：每个产品的保额数字与其对外声明一致
+    bad = []
+    for e in full.get("products", []):
+        c = e.get("coverage") or 0
+        w = c // 10000
+        txt = (e.get("key_benefits") or "")
+        for num in ("600万", "500万", "300万"):
+            if num in txt and num != f"{w}万":
+                bad.append((e.get("product_name"), num, f"{w}万"))
+    ok5 = not bad
+    allok = allok and ok5
+    check(f"全部产品 key_benefits 保额数字与实际一致（不一致 {len(bad)} 条）", ok5,
+          f"示例 {bad[:3]}")
+
+    # ⑥ 正则层面：「600万高保额」/「医疗险600万保额」必须被校正
+    n = pd._normalize_coverage_claim
+    ok6 = ("400万" in n("600万高保额，含质子重离子", 4000000)
+           and "600万" not in n("600万高保额，含质子重离子", 4000000))
+    allok = allok and ok6
+    check("_normalize_coverage_claim 校正「600万高保额」→ 实际保额", ok6)
+    ok7 = ("400万" in n("医疗险600万保额，涵盖最新治疗手段", 4000000))
+    allok = allok and ok7
+    check("_normalize_coverage_claim 校正「医疗险600万保额」", ok7)
+
+    # ⑧ 源码级：features 中不得再写死「医疗险600万保额」
+    src = open(os.path.join(SKILL_DIR, "scripts", "plan_designer.py"), encoding="utf-8").read()
+    ok8 = ('"医疗险600万保额' not in src)
+    allok = allok and ok8
+    check("源码中无写死的「医疗险600万保额」", ok8)
+    return allok
+
+
+def test_f7_renewal_long_term_precedence(pd):
+    """F7 (SDI-4, 2.3.9 复扫): long_term 标记优先于 duration_value"""
+    print("\nTest F7: 长期保证续保标记优先级（SDI-4）")
+    base = {
+        "coverage_period_duration_unit": "year",
+        "coverage_period_duration_value": 1,
+        "coverage_period_is_lifetime": False,
+        "coverage_period_guaranteed_renewable": True,
+    }
+    rdy = pd._renewal_duration_years
+    cases = [
+        ("long_term 标记 + duration=1 → None", dict(base, coverage_period_parse_notes=["long_term_with_guaranteed_renewable"]), None),
+        ("数值标记 20 年 → 20", dict(base, coverage_period_parse_notes=["guaranteed_renewable_20年"]), 20),
+        ("数值标记 6 年 → 6", dict(base, coverage_period_parse_notes=["guaranteed_renewable_6年"]), 6),
+        ("long_term 与数值并存 → None", dict(base, coverage_period_parse_notes=["long_term_with_guaranteed_renewable", "guaranteed_renewable_20年"]), None),
+        ("unit=long_term → None", dict(base, coverage_period_parse_notes=None, coverage_period_duration_unit="long_term"), None),
+        ("无标记 duration=1 → 1", dict(base, coverage_period_parse_notes=None), 1),
+    ]
+    allok = True
+    for label, prod, want in cases:
+        got = rdy(prod)
+        ok = (got == want)
+        allok = allok and ok
+        check(label, ok, f"实得 {got}，期望 {want}")
+
+    lt = dict(base, coverage_period_parse_notes=["long_term_with_guaranteed_renewable"])
+    cp = pd.derive_medical_coverage_period(lt)
+    ok1 = ("长期保证续保" in cp) and ("1年保证续保" not in cp)
+    allok = allok and ok1
+    check(f"derive_medical_coverage_period 输出「长期保证续保」（实际 {cp}）", ok1)
+    kb = pd.derive_medical_key_benefits(lt, "长期医疗保障")
+    ok2 = ("1年保证续保" not in kb)
+    allok = allok and ok2
+    check(f"derive_medical_key_benefits 不出现「1年保证续保」（实际 {kb}）", ok2)
+    return allok
+
+
+def test_f8_global_trigger_insurance_context():
+    """F8 (SQP-1, 2.3.9 复扫): 触发词必须带保险语境约束（覆盖整个 skill）"""
+    print("\nTest F8: 全局/模块触发词的保险语境约束（SQP-1）")
+    with open(os.path.join(SKILL_DIR, "SKILL.md"), "r", encoding="utf-8") as f:
+        text = f.read()
+
+    import re as _re
+    ctx = ("保险", "重疾险", "医疗险", "寿险", "意外险", "储蓄险", "年金险", "两全险", "险种")
+    generic = ["话术", "需求分析", "保障缺口", "产品对比", "设计方案", "合规", "核保",
+               "拒赔", "等待期", "现金价值", "健康告知", "朋友圈文案", "社交文案",
+               "产品推广", "异议处理", "新人培训", "多少钱"]
+
+    bad = []
+    for ln in text.splitlines():
+        m = _re.match(r"\*\*触发词\*\*：(.+)$", ln.strip())
+        if not m:
+            continue
+        for item in [x.strip() for x in m.group(1).split("、")]:
+            for g in generic:
+                if g in item and not any(c in item for c in ctx):
+                    bad.append((item, g))
+    check(f"所有模块触发词均带保险语境（检查 {len(generic)} 个泛用词）",
+          not bad, f"越界条目：{bad}")
+
+    global_line = next((ln for ln in text.splitlines()
+                        if ln.startswith("保险咨询、保险配置")), "")
+    bad_global = []
+    for item in [x.strip() for x in global_line.replace("保险咨询、", "").split("、") if x.strip()]:
+        for g in ["话术", "需求分析", "保障缺口"]:
+            if g in item and not any(c in item for c in ctx):
+                bad_global.append((item, g))
+    check("全局触发词表无脱离保险语境的泛用词", not bad_global,
+          f"仍孤立出现：{bad_global}")
+
+    ok3 = ("触发词作用域" in text) and ("全局" in text) and ("澄清" in text)
+    check("存在全局触发词作用域声明（含语境不明时先澄清）", ok3)
+    return (not bad) and (not bad_global) and ok3
+
+
 def main():
     print("=" * 70)
     print("ClawHub 安全审计整改回归测试（2026-11-07）")
@@ -1096,6 +1248,9 @@ def main():
     test_f3_coverage_unit_doc_and_behavior(pd)
     test_f4_cap_unknown_disclosure(pd)
     test_f5_unit_contract_sdi4(pd)
+    test_f6_600w_claim_not_misreported(pd)
+    test_f7_renewal_long_term_precedence(pd)
+    test_f8_global_trigger_insurance_context()
     test_a_400_redline()
 
     passed = sum(1 for _n, ok, _d in _results if ok)

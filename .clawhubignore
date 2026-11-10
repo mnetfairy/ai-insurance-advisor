@@ -13,6 +13,9 @@
 #   - references/_repo_analysis_*.md : 内部分析报告。
 #   - references/保险资料库分析报告_* : 内部分析报告（含 DOCX 二进制）。
 #   - references/backups/        : 数据备份目录。
+#   - *.bak / *.bak.* / *.orig / *.backup* : 编辑与备份副产物。
+#   - __pycache__/ / *.pyc       : Python 字节码缓存。
+#   - .DS_Store                  : macOS 目录元数据。
 #
 # ⚠️ 运行时白名单仅 3 个脚本：
 #      scripts/needs_analyzer.py
@@ -21,6 +24,10 @@
 #
 # ⚠️ 以上仅为发布面收敛；本地维护链路（runtime_patches / 清洗 / 测试）
 #    在开发机上照常可用，不受本文件影响。
+#
+# ⚠️ 发布面应为 7 个文件：SKILL.md + 3 个只读参考文件 + 3 个运行时脚本。
+#    2026-11-10 实测修正：此前缺 `*.bak` 与 `__pycache__` 规则，
+#    导致 premium_calculator.py.bak.* 与 __pycache__ 被打进发布产物（发布面 9 个）。
 
 scripts/sanitize_products_json.py
 scripts/test_budget_compliance.py
@@ -40,3 +47,14 @@ references/保险资料库分析报告_*.md
 references/保险资料库分析报告_*.docx
 references/backups/
 references/backups/**
+
+# ---- 其他本地副产物 ----
+**/__pycache__/
+**/*.pyc
+**/*.bak
+**/*.bak.*
+**/*.orig
+**/*.orig.*
+**/*.backup
+**/*.backup_*
+.DS_Store

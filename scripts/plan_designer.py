@@ -122,6 +122,14 @@ def _renewal_duration_years(product):
     """
     notes = _parse_notes_list(product)
     for note in notes:
+        # ⚠️ SDI-4 整改 2026-11-10：**long_term 标记必须优先于数值标记与 duration_value**。
+        # 旧实现只匹配 `guaranteed_renewable_N年` 数值标记，遇到
+        # 'long_term_with_guaranteed_renewable' 会**穿透**到 duration_value 分支 →
+        # 把「保险期间 1 年」当成「保证续保 1 年」返回，与 docstring 声明的
+        # 「长期，不按年限计 → None」**相反** → 对外文案会错报「1年保证续保」。
+        # 修法：先扫 long_term 标记 → 直接返回 None（长期，不按年限计）。
+        if _RE_LONG_TERM_MARK.search(note):
+            return None
         m = _RE_GUARANTEED_YEARS.search(note)
         if m:
             return int(m.group(1))
@@ -129,6 +137,9 @@ def _renewal_duration_years(product):
     if product.get("coverage_period_is_lifetime") is True:
         return None
     unit = (product.get("coverage_period_duration_unit") or "").strip().lower()
+    if unit == "long_term":
+        # 单位本身就是 long_term → 长期，不按年限计
+        return None
     value = product.get("coverage_period_duration_value")
     if unit == "year" and isinstance(value, (int, float)):
         return int(value)
@@ -648,23 +659,42 @@ def _coverage_claim_text(coverage):
 
 
 def _normalize_coverage_claim(text, coverage):
-    """把文本里的保额量词表述替换为由**实际保额**派生的表述。"""
+    """把文本里的保额量词表述替换为由**实际保额**派生的表述。
+
+    ⚠️ SDI-4 整改 2026-11-10：**补齐「数字+万+高保额」与「险种名+数字+万」两种形态**。
+    旧实现只匹配「100万保额」「600万医疗」等「数字+万」紧跟关键词的形态，
+    **漏掉了**「600万高保额」「医疗险600万保额」这类写法 →
+    保额被 max_coverage 夹到 400 万后，对外仍宣称 600 万（虚报可售保额）。
+    官方扫描原文（ai-insurance-advisor 2.3.8 SDI-4）：
+    「The promised final reconciliation of coverage claims leaves the premium medical plan's
+     hard-coded "600万高保额" unchanged when actual coverage is reduced.」
+    修法：凡文本中出现「数字+万」且位于保额语境的，一律替换为实际保额表述。
+    """
     if not isinstance(text, str) or not text:
         return text
-    import re as _re
+
     claim = _coverage_claim_text(coverage)
 
     def _sub_num(m):
         # 形如「100万保额」：用实际保额量词替换整个「数字+万」，保留后缀
         return claim + m.group(2)
 
-    out = _re.sub(r"(\d+(?:\.\d+)?)万(保额|意外|医疗|重疾|身故|赔付|保障|，)",
-                  lambda m: claim + m.group(2), text)
-    out = _re.sub(r"(\d+(?:\.\d+)?)万(，(?:仅需|含|含质子))",
-                  lambda m: claim + m.group(2), out)
-    # 「百万医疗」——实际保额 <100 万时不得再称「百万」
+    # ① 「数字+万」后紧跟保额类关键词（保额/高保额/意外/医疗/重疾/身故/赔付/保障/，）
+    out = re.sub(r"(\d+(?:\.\d+)?)万(保额|高保额|意外|医疗|重疾|身故|赔付|保障|，)",
+                 _sub_num, text)
+    # ② 「数字+万」后紧跟逗号 + 常见后缀（，仅需 / ，含 / ，含质子）
+    out = re.sub(r"(\d+(?:\.\d+)?)万(，(?:仅需|含|含质子))",
+                 _sub_num, out)
+    # ③ 「医疗险600万保额」这类「险种名+数字+万」已在 ① 覆盖（后缀是「保额」），
+    #    但残留的裸「数字+万」紧跟在险种名之后（如「医疗险600万，…」）也替换。
+    out = re.sub(r"((?:医疗险|意外险|重疾险|寿险|储蓄险))(\d+(?:\.\d+)?)万",
+                 lambda m: m.group(1) + claim, out)
+    # ④ 「百万医疗」——实际保额 <100 万时不得再称「百万」
     if "百万医疗" in out and coverage < 1000000:
         out = out.replace("百万医疗", f"{claim}医疗")
+    # ⑤ 「百万」独立出现（无「医疗」后缀）时同样按实际保额校正
+    if "百万" in out and coverage < 1000000:
+        out = out.replace("百万", claim)
     return out
 
 
@@ -1328,10 +1358,19 @@ def design_premium_plan(age, gender, annual_income, annual_budget, coverage_need
             })
             plan["annual_premium"] += sa_premium
 
+    # features 中的医疗险描述由**真实选中产品与实际保额**派生
+    # ⚠️ SDI-4 整改 2026-11-10：原写死「医疗险600万保额」，
+    #    保额被 max_coverage 夹到 400 万后对外仍宣称 600 万（虚报可售保额）。
+    mi_entry = next((e for e in plan["products"] if e["type"] == "医疗险"), None)
+    if mi_entry:
+        mi_feature = (f"医疗险{mi_entry['coverage'] // 10000}万保额，"
+                      f"{mi_entry['coverage_period']}，涵盖最新治疗手段")
+    else:
+        mi_feature = "本方案未包含医疗险"
     plan["features"] = [
         "全方位高保额保障：寿险+重疾+医疗+意外",
         "重疾险保额高达年收入5倍",
-        "医疗险600万保额，涵盖最新治疗手段",
+        mi_feature,
         "定期寿险高保额，覆盖所有家庭财务责任",
         "可选储蓄险，为养老做准备",
         "年保费已按年度保费上限（min(年度预算, 年收入×20%)）校验"
