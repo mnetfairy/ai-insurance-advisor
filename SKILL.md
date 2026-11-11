@@ -1,7 +1,7 @@
 ---
 name: ai-insurance-advisor
 description: 中国大陆保险顾问。本 skill 覆盖 8 项能力：保险需求分析（needs_analyzer.py）、产品对比（premium_calculator.py + 本地 products.json）、保费计算（premium_calculator.py）、方案设计（plan_designer.py）、保险知识问答（insurance-knowledge.md）、合规要点提示（compliance.md）、朋友圈/社交营销文案生成（agent LLM 生成，无专属脚本）、培训话术支持（agent LLM 生成，无专属脚本）。不提供核保预审、理赔代办、代理人展业工具等能力——这些场景请转人工或调用专业服务。发布产物仅含 SKILL.md + 3 个只读参考文件 + 3 个运行时脚本（needs_analyzer / premium_calculator / plan_designer）；数据清洗与回归测试脚本为本地维护工具，不随发布产物分发。
-version: 2.4.1
+version: 2.4.2
 tags: insurance, china, financial, advisor, product-comparison, medical, family-protection, health
 last_published: 2026-11-11
 allowed-tools:
@@ -755,6 +755,27 @@ fallback 三件套 / SKILL.md 引用 / 🔒 默认隐藏），防止后续整改
 ***
 
 ## 更新日志
+
+- v2.4.2 (2026-11-11)：**官方扫描复扫后整改（SDI-4 features 保额同步 + 续保标记顺序无关）**：
+  - **SDI-4（Excessive Agency，MEDIUM）**：官方原文——
+    「The premium plan constructs its medical coverage feature before `_finalize_plan`
+    applies budget-driven coverage reductions. Finalization updates the product coverage
+    and key_benefits but only prunes features for removed insurance types, so a retained
+    medical product can have a lower final coverage amount while its feature still
+    advertises the original amount.」
+    实测复现：预算 8000 档下全面版医疗险被下调到 **100 万**，但 features 仍写「医疗险**400万**保额」。
+    修法：新增 `_sync_features_coverage_claims()` —— 在**出口处**（`_enforce_budget` 完成后）
+    按每个保留险种的**最终保额**重算 features 中的保额表述。
+  - **SDI-4-续保（顺序无关）**：`_renewal_duration_years()` 原为**单轮扫描**，
+    遇到数值型标记即**立即返回** → 数值标记排在 long_term 标记之前时
+    （`['guaranteed_renewable_1年', 'long_term_with_guaranteed_renewable']`）
+    → 错报「1年保证续保」，**结果依赖 notes 排列顺序**。
+    修法：**分两轮扫描** —— 先全表扫 long_term 标记（命中即返回 None），再扫数值型标记。
+  - **恒真检测器修正**：`check(desc, False)` 是失败分支的**合法**断言（原实现误报为恒真），
+    现只把 `check(desc, True)` 计入恒真命中。
+  - ⚠️ **400 电话优先推荐功能零改动**：锁定标记 = 20 / 首选公司 = 10 / 客服电话 = 6
+    （均与基线一致）；本 skill 仍为「联系方式默认隐藏、用户询问后展示」策略
+  - **测试**：155 → **159 项** → 159/159 PASS；连同其余 4 套件共 **393 项全 PASS**
 
 - v2.4.0 (2026-11-10)：**v2.3.8 官方复扫后整改（SDI-4 保额声明校正 + 长期续保标记 + SQP-1 全局触发词）**：
   - **官方扫描验证（v2.3.8 已公开）**：`clawhub scan download ai-insurance-advisor --version 2.3.8`

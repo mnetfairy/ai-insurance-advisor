@@ -842,10 +842,15 @@ def test_f4_cap_unknown_disclosure(pd):
 
 
 def _find_literal_bool_check_calls(src):
-    """找出 `check("...", True)` / `check("...", False)` 形式的恒真/恒假断言。
+    """找出 `check("...", True)` 形式的**恒真**断言。
 
     Returns:
         list[tuple[int, str]]: (行号, 断言名)
+
+    ⚠️ 2026-11-11 修正：原实现把 `check("...", False)` 也算作命中，
+    但**失败分支里的 `check(desc, False)` 是合法的断言**（用于在出错时打标记），
+    不是恒真。把它们误报会导致检测器自身失去意义（假阳性）。
+    → 现在只把 `True`（恒真）计入；`False` 不再命中。
     """
     import ast as _ast
     try:
@@ -860,7 +865,8 @@ def _find_literal_bool_check_calls(src):
         if len(node.args) < 2:
             continue
         cond = node.args[1]
-        if isinstance(cond, _ast.Constant) and isinstance(cond.value, bool):
+        # 只有字面 True 才是恒真；字面 False 是失败分支的合法断言
+        if isinstance(cond, _ast.Constant) and cond.value is True:
             label = ""
             if node.args and isinstance(node.args[0], _ast.Constant):
                 label = str(node.args[0].value)
@@ -1251,6 +1257,75 @@ def test_f8_global_trigger_insurance_context():
     return (not bad) and (not bad_global) and ok3
 
 
+def test_f9_features_coverage_claim_sync(pd):
+    """F10 (SDI-4, v2.4.1 官方复扫): features 的保额数字必须与最终保额一致
+
+    官方扫描原文：
+    「The premium plan constructs its medical coverage feature before _finalize_plan
+     applies budget-driven coverage reductions. Finalization updates the product coverage
+     and key_benefits but only prunes features for removed insurance types, so a retained
+     medical product can have a lower final coverage amount while its feature still
+     advertises the original amount.」
+    实测复现（budget=8000）：全面版医疗险被预算下调到 100 万，但 features 仍写「医疗险400万保额」。
+    """
+    print("\nTest F10: features 保额数字与最终保额一致（SDI-4）")
+    import re as _re
+
+    # 预算小到触发医疗险 downscale 但不移除产品
+    plans = pd.generate_all_plans(
+        35, "男", 500000, 8000,
+        {"death": 2000000, "critical_illness": 1500000, "hospital": 4000000})
+
+    allok = True
+    hit = 0
+    for name, p in plans.items():
+        mi = next((e for e in p.get("products", []) if e.get("type") == "医疗险"), None)
+        if mi is None:
+            continue
+        cov = mi.get("coverage") or 0
+        wan = cov // 10000
+        feats = [f for f in (p.get("features") or []) if isinstance(f, str)]
+        hit += 1
+        for f in feats:
+            for num in _re.findall(r"(\d+)万", f):
+                # 该 feature 提及医疗险时，其保额数字必须等于医疗险最终保额
+                if "医疗险" in f and int(num) != wan:
+                    allok = False
+                    check(f"{name}: features 保额 {num}万 ≠ 实际 {wan}万（{f}）", False)
+        # key_benefits 同样必须一致
+        kb = mi.get("key_benefits") or ""
+        for num in _re.findall(r"(\d+)万", kb):
+            if int(num) != wan:
+                allok = False
+                check(f"{name}: key_benefits 保额 {num}万 ≠ 实际 {wan}万（{kb}）", False)
+    check(f"预算下调场景（budget=8000）：{hit} 套含医疗险方案，features/key_benefits 保额均与实际一致",
+          allok and hit > 0, f"命中方案数 {hit}")
+
+    # 源码级：出口必须调用 _sync_features_coverage_claims
+    src = open(os.path.join(SKILL_DIR, "scripts", "plan_designer.py"), encoding="utf-8").read()
+    ok2 = "_sync_features_coverage_claims(plan)" in src
+    check("源码：_finalize_plan 出口调用 _sync_features_coverage_claims", ok2)
+    ok3 = hasattr(pd, "_sync_features_coverage_claims")
+    check("_sync_features_coverage_claims 函数存在", ok3)
+
+    # 正常预算场景不应被误改（保额仍 400 万 → features 仍 400 万）
+    plans2 = pd.generate_all_plans(
+        35, "男", 500000, 500000,
+        {"death": 2000000, "critical_illness": 1500000, "hospital": 4000000})
+    full = plans2.get("全面版") or {}
+    mi2 = next((e for e in full.get("products", []) if e.get("type") == "医疗险"), None)
+    ok4 = True
+    if mi2:
+        wan2 = mi2.get("coverage", 0) // 10000
+        for f in full.get("features") or []:
+            if "医疗险" in str(f):
+                for num in _re.findall(r"(\d+)万", str(f)):
+                    if int(num) != wan2:
+                        ok4 = False
+    check("正常预算场景：features 保额与实际一致（未被误改）", ok4)
+    return allok and ok2 and ok3 and ok4
+
+
 def main():
     print("=" * 70)
     print("ClawHub 安全审计整改回归测试（2026-11-07）")
@@ -1276,6 +1351,7 @@ def main():
     test_f6_600w_claim_not_misreported(pd)
     test_f7_renewal_long_term_precedence(pd)
     test_f8_global_trigger_insurance_context()
+    test_f9_features_coverage_claim_sync(pd)
     test_a_400_redline()
 
     passed = sum(1 for _n, ok, _d in _results if ok)
