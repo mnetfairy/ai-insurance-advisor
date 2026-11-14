@@ -755,55 +755,81 @@ fallback 三件套 / SKILL.md 引用 / 🔒 默认隐藏），防止后续整改
 ***
 
 ## 更新日志
-- v2.4.8 (2026-11-14)：**官方 2.4.7 复扫后整改（SDI-4 治疗手段宣称否定语境）**：
-  - **官方扫描（v2.4.7 已公开）**：scanner 2.12.0 仍报 **SDI-4（Excessive Agency，MEDIUM，置信 0.99）**
-    —— 官方原文：「Treatment claims are presented as covered benefits based on keyword
-    presence, even when the source excludes them.」
-  - **根因（v2.4.7 修复引入的回归）**：`_medical_treatment_claims` 只判「关键词是否出现」
-    （`kw in blob`），**不判**「这次出现是否被条款排除」→ 事实源文本里的纯除外条款
-    （「不含CAR-T」「质子重离子不予报销」）会被 `_medical_treatment_suffix` 转成
-    「，含CAR-T治疗」的**承保宣称** → 官方 finding。
-  - **修法（否定语境感知 · 逐次出现判定）**：新增 `_keyword_is_negated()`（单一事实来源）与
-    `_negation_context()`；每个关键词遍历事实源文本中的**全部**出现位置，每次出现都取
-    上下文窗口（命中点前后 30 字符 / 不跨子句）判断是否落在否定或除外语境
-    （不含 / 不包含 / 不予报销 / 不报销 / 除外 / 不在保障范围 / 不覆盖 / 无法报销 /
-    不能报销 / 不承保 / 不赔 / 不予支付 …）。
-    - 该关键词**全部**出现皆为否定 → **不**计入 claims（纯除外条款不得转为承保宣称）；
-    - 存在**非否定**出现 → 计入（肯定 + 否定并存仍算有授权）；
-    - 同时存在否定出现与**明确肯定**表述（"含…"/"…可报销"）→ 仍计入。
-  - **未改动**：`_medical_fact_text()` 事实源口径（`key_benefits` 元素 + `highlights` 字符串）
-    与 `_TREATMENT_CLAIMS` 关键词集合**一字未动**；`_medical_treatment_suffix()` 逻辑不变。
-  - **对现有产品库输出零变化**：实测线上产物 `references/products.json` 原始条目 **2563 条**
-    → 否定语境命中 **0**；运行时在售池 **509 款** → 新旧口径 claims 差异 **0**
-    （关键词命中分布：质子重离子 14 · 靶向药 12 · 特药 5 · CAR-T 2 · 外购药 1）；
-    5 组收入×预算档位的方案产出（premium / total_coverage / 各险种 coverage / 对外文案）
-    改动前后 **md5 完全一致** → 属**防御性加固**，堵住「未来产品库出现除外条款文本时被误读为承保」的口子。
-  - **回归**：新增 **F13**（6 个对抗场景 + 纯否定不得转承保宣称 + 肯定/否定并存语义 +
-    源码级断言「函数体内不得出现无条件 `kw in blob`」+ 事实源口径与关键词集合未改）。
-  - **测试**：`test_audit_remediation.py` 173 → **193 项** → 193/193 PASS；
-    连同其余 4 套件共 **427 项全 PASS**
+- v2.4.10 (2026-11-14)：**官方 2.4.8/2.4.9 复扫后整改（SDI-4 变体 · 除外作用域内的肯定词不得授权承保宣称）**：
+  - **官方复扫结果（scanner 2.12.0，官方扫描包实测）**：
+    - ai **2.4.8**（10:05 发布，products.json 未压缩）= `issueCount=36 / score=81 /
+      severity=CRITICAL / clawscan verdict=suspicious`，AE1×25（全部由未压缩大文件造成）；
+    - ai **2.4.9**（10:45 发布，发布侧压缩已修 → products.json **3,772,123 B** 压缩态）
+      → 回到 `1 / 12 / LOW / suspicious`（**SDI-4×1**，代码侧未修）→ **仍未消除**。
+    - 对照 china **2.4.8** = `issueCount=17 / score=81 / CRITICAL / DO_NOT_INSTALL`
+      （AE1×13 + EA3×2 + YR4×1 + SDI-4×1）→ 比 2.4.7（1 / 12 / LOW）**更差**，2.4.8 是**回归版**。
+  - **根因 ①（发布侧 · 与本轮代码整改无关）**：`publish_one_skill.py` 只调
+    `compact_salary_database_for_publish`，对 basename != `salary_database.json` 是 **no-op**
+    → 保险双库 `references/products.json` 以原形态（7.5MB）上线 → AE1 / YR4 / EA3 全部由它造成。
+    （压缩后发布的 2.4.7 只有 **1** 条 finding，即 SDI-4。）
+  - **根因 ②（代码侧 · 本轮修的就是它）**：官方 SDI-4 finding 原文——
+    「The treatment-claim logic can override a detected exclusion because
+     `_occurrence_is_affirmative` does not require the treatment occurrence or its
+     affirmative wording to be outside the negated scope. For example,
+     「不包含CAR-T治疗费用给付」 marks CAR-T as excluded, but the nearby 「给付」 satisfies
+     the affirmative check, causing `_medical_treatment_suffix` to advertise 「含CAR-T治疗」.」
+    机制：肯定回退只检查肯定词**是否落在否定词字符跨度内**，**没检查是否落在否定作用域内** ——
+    「不含」的字符跨度仅 (0,2)，而「报销」在 (11,13) → 被当成对 CAR-T 的授权 →
+    回退分支把已判否定的 CAR-T 又加回。实测复现：
+    `_medical_treatment_claims({'key_benefits':['不含CAR-T治疗费用报销'],'highlights':''})`
+    → `['CAR-T']`（错）。
+  - **官方 remediation 口径（本轮实现的唯一依据）**：
+    「Require affirmative evidence to apply to the **same treatment occurrence** and to lie
+     **outside its entire exclusion scope**, not merely outside the negation marker's character
+     span. Treat conflicting or ambiguous coverage statements as **unverified** rather than
+     emitting unconditional coverage claims.」
+  - **修法（作用域 ≠ 字符跨度）**：
+    - 新增 `_negation_scope_map(blob, occurrences, spans, owner)` —— 建立「否定**作用域**」映射
+      （作用域 ≠ 否定词字符跨度）。官方例子里「不含」的跨度只有 (0,2)，但作用域覆盖到子句末尾，
+      作用域内的「报销」「给付」属于除外条款自身 → **不得**当作承保授权。
+    - 新增 `_medical_fact_owner_map(product)` —— 事实源文本的**字段归属映射**
+      （0 = key_benefits，1 = highlights，-1 = 分隔空格），函数内含 `assert owner_blob == blob`
+      → 与 `_medical_fact_text` 口径**锁死一致**；用于判定「跨字段冲突 → unverified」。
+    - 新增 `_scope_has_affirmative(blob, negated_occ, scope_map)` —— 除外表述**自身**含肯定字样
+      → 该表述自相矛盾 → 按官方口径「conflicting statements as unverified」**不宣称**。
+    - `_has_affirmative(text, base, spans, excluded=())` 增加 `excluded` 参数：肯定证据必须
+      ① 不在否定词字符跨度内 **且** ② 不在除外作用域内。
+    - `_occurrence_is_affirmative(..., scope_map=None)` 透传 excluded；
+      `_medical_treatment_claims()` 建 scope_map → 授权证据必须 ① 落在该次出现之外、
+      ② 落在**整个除外作用域**之外、③ 与除外条款**同字段**。
+  - **未改动**：`_TREATMENT_CLAIMS` 关键词集合、`_medical_fact_text()` 事实源口径、
+    `_medical_treatment_suffix()`、`_negation_context()` / `_keyword_is_negated()` /
+    `_scope_bounds()` / `_clause_head()` / `_clause_tail()`、`_AFFIRM_MARKERS` 词表。
+  - **对现有产品库零变化**：实测 `references/products.json` 原始条目 **2563 条**；
+    `negation_bound_products = 0`；**179 条对外宣称**的 claims 签名 md5 修复前后**完全一致**
+    （`bb2fbf3abf874e0b9587721915cf1d6a`，两库一致）→ 属**纯防御性加固**。
+  - **回归**：新增 **F14**（8 个对抗场景 + 3 条源码级断言 + F13 全 6 场景交叉验证）。
+  - **测试**：`test_audit_remediation.py` 193 → **225 项** → **225/225 PASS**；
+    连同其余 4 套件共 **459 项全 PASS**（budget 192 + data_hygiene 22 + discontinued 13 +
+    recommendations 7）
   - ⚠️ **400 电话优先推荐功能零改动**：本 skill 仍为「联系方式默认隐藏、用户询问后展示」策略；
-    锁定标记 / 首选公司 / 客服电话语义均未改动
+    客服电话 / 首选公司 / 锁定标记语义均未改动
+  - **发布前门禁**（已落地于 `_scratch/publish/publish_one_skill.py`）：
+    未压缩 / 压缩后体积未变小 / 最大行长 > 1000 → **拒绝发布**
+    （版本号**永久占位**，带缺陷上线不可逆）
 
-- v2.4.5 (2026-11-13)：**官方 2.4.4 复扫后整改（SDI-4 重疾声明派生）**：
-  - **SDI-4（Excessive Agency，MEDIUM）**：官方原文——
-    「The comprehensive plan can advertise multiple critical-illness payouts and lifetime
-     protection for a fallback product whose terms have not been verified.」
-  - **根因 1（选品恒假）**：全面版多次赔付选品条件 `"多次" in (p.get("core_coverage") or "")`
-    对 660 款重疾险**恒为假**（`core_coverage` 全空）→ 永远退化为兜底任意一款 →
-    公告级 finding「fallback product whose terms have not been verified」。
-    → 口径改为**权威字段 `subtype`**（在售含「多次」27 款），命中即真实选品，非兜底。
-  - **根因 2（文案写死）**：`coverage_period` 写死「终身」、`key_benefits` 写死
-    「重疾多次赔付，终身保障」「120种重疾+轻症保障」→ 无论兜底品实际条款如何，照写虚报。
-    → 新增 `_crx_is_multi()` / `_crx_is_lifetime()` / `_crx_coverage_period()` /
-    `_crx_disease_claim()` / `_crx_key_benefits()` / `_crx_feature()`：
-    **「多次赔付」只认 `subtype`**（实测 84 款产品 `key_benefits` 写「多次赔付」但 `subtype` 不含，
-    抄原文会把属性说反）、**「终身」只认 `coverage_period_is_lifetime` / `coverage_period`**、
-    **病种/轻症只认 `highlights` 字符串**（`key_benefits` 是 list，元素级匹配恒 False）。
-  - **兜底如实报告**：无多次给付合格品时在 `limitations` 记一条 `coverage_limit`，
-    不再谎称已满足。
-  - **回归**：新增低预算档位 + 对抗场景（产品池全为非多次/非终身重疾）+ 年收入缺失 三类用例。
-
+- v2.4.9 (2026-11-14)：**发布侧压缩分派修正（发布面回归修复，SDI-4 代码侧未修）**：
+  - **本版做了什么**：修正 `publish_one_skill.py` 的**压缩器分派** ——
+    原实现对**所有** skill 都调 `compact_salary_database_for_publish`，
+    对 basename != `salary_database.json` 是 **no-op** → 保险双库 `references/products.json`
+    以**原形态大文件**上线（扫描器 AE1「Referenced artifact was not completely inspected」）。
+    修正后 `references/products.json` 走 `compact_products_json_for_publish`
+    → ai 库线上产物由 7.5MB 降为 **3,772,123 B**（最大行长 686 B）。
+  - **官方复扫**：ai **2.4.8**（未压缩发布）= `issueCount=36 / score=81 / CRITICAL /
+    clawscan verdict=suspicious`（AE1×25）；本版 **2.4.9**（压缩后发布）→ 回到
+    `1 / 12 / LOW / suspicious`，残余 **SDI-4×1** → **SDI-4 未消除**。
+  - **⚠️ 本版只修了发布面，未修 SDI-4 代码侧**：「肯定回退越过除外作用域」的缺陷仍在
+    （「不含CAR-T治疗费用报销」里的「报销」仍会被当成对 CAR-T 的授权）。
+    代码侧整改在 **v2.4.10** 完成。
+  - **教训**：**发布前必须验证「发布产物 = 预期的那个产物」** ——
+    压缩器分派抄漏 → 7.5MB 原文件上线 → 分数从 12 飙到 81（CRITICAL）。
+    版本号**永久占位**，带缺陷上线**不可逆** → 发布前必须加门禁：
+    ① 压缩器确实生效 ② 压缩后体积确实变小 ③ 最大行长 ≤ 1000。
 
 <!-- 历史版本更新日志已归档到 workspace/skills-analysis/archives/skill-changelogs/<skill>-changelog.md
      （保留完整审计历史；此处只留最近 2 个版本，控制 SKILL.md 体积以通过 collection review 限额） -->
