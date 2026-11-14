@@ -1,7 +1,7 @@
 ---
 name: ai-insurance-advisor
 description: 中国大陆保险顾问。本 skill 覆盖 8 项能力：保险需求分析（needs_analyzer.py）、产品对比（premium_calculator.py + 本地 products.json）、保费计算（premium_calculator.py）、方案设计（plan_designer.py）、保险知识问答（insurance-knowledge.md）、合规要点提示（compliance.md）、朋友圈/社交营销文案生成（agent LLM 生成，无专属脚本）、培训话术支持（agent LLM 生成，无专属脚本）。不提供核保预审、理赔代办、代理人展业工具等能力——这些场景请转人工或调用专业服务。发布产物仅含 SKILL.md + 3 个只读参考文件 + 3 个运行时脚本（needs_analyzer / premium_calculator / plan_designer）；数据清洗与回归测试脚本为本地维护工具，不随发布产物分发。
-version: 2.4.7
+version: 2.4.8
 tags: insurance, china, financial, advisor, product-comparison, medical, family-protection, health
 last_published: 2026-11-14
 allowed-tools:
@@ -755,6 +755,35 @@ fallback 三件套 / SKILL.md 引用 / 🔒 默认隐藏），防止后续整改
 ***
 
 ## 更新日志
+- v2.4.8 (2026-11-14)：**官方 2.4.7 复扫后整改（SDI-4 治疗手段宣称否定语境）**：
+  - **官方扫描（v2.4.7 已公开）**：scanner 2.12.0 仍报 **SDI-4（Excessive Agency，MEDIUM，置信 0.99）**
+    —— 官方原文：「Treatment claims are presented as covered benefits based on keyword
+    presence, even when the source excludes them.」
+  - **根因（v2.4.7 修复引入的回归）**：`_medical_treatment_claims` 只判「关键词是否出现」
+    （`kw in blob`），**不判**「这次出现是否被条款排除」→ 事实源文本里的纯除外条款
+    （「不含CAR-T」「质子重离子不予报销」）会被 `_medical_treatment_suffix` 转成
+    「，含CAR-T治疗」的**承保宣称** → 官方 finding。
+  - **修法（否定语境感知 · 逐次出现判定）**：新增 `_keyword_is_negated()`（单一事实来源）与
+    `_negation_context()`；每个关键词遍历事实源文本中的**全部**出现位置，每次出现都取
+    上下文窗口（命中点前后 30 字符 / 不跨子句）判断是否落在否定或除外语境
+    （不含 / 不包含 / 不予报销 / 不报销 / 除外 / 不在保障范围 / 不覆盖 / 无法报销 /
+    不能报销 / 不承保 / 不赔 / 不予支付 …）。
+    - 该关键词**全部**出现皆为否定 → **不**计入 claims（纯除外条款不得转为承保宣称）；
+    - 存在**非否定**出现 → 计入（肯定 + 否定并存仍算有授权）；
+    - 同时存在否定出现与**明确肯定**表述（"含…"/"…可报销"）→ 仍计入。
+  - **未改动**：`_medical_fact_text()` 事实源口径（`key_benefits` 元素 + `highlights` 字符串）
+    与 `_TREATMENT_CLAIMS` 关键词集合**一字未动**；`_medical_treatment_suffix()` 逻辑不变。
+  - **对现有产品库输出零变化**：实测线上产物 `references/products.json` 原始条目 **2563 条**
+    → 否定语境命中 **0**；运行时在售池 **509 款** → 新旧口径 claims 差异 **0**
+    （关键词命中分布：质子重离子 14 · 靶向药 12 · 特药 5 · CAR-T 2 · 外购药 1）；
+    5 组收入×预算档位的方案产出（premium / total_coverage / 各险种 coverage / 对外文案）
+    改动前后 **md5 完全一致** → 属**防御性加固**，堵住「未来产品库出现除外条款文本时被误读为承保」的口子。
+  - **回归**：新增 **F13**（6 个对抗场景 + 纯否定不得转承保宣称 + 肯定/否定并存语义 +
+    源码级断言「函数体内不得出现无条件 `kw in blob`」+ 事实源口径与关键词集合未改）。
+  - **测试**：`test_audit_remediation.py` 173 → **193 项** → 193/193 PASS；
+    连同其余 4 套件共 **427 项全 PASS**
+  - ⚠️ **400 电话优先推荐功能零改动**：本 skill 仍为「联系方式默认隐藏、用户询问后展示」策略；
+    锁定标记 / 首选公司 / 客服电话语义均未改动
 
 - v2.4.5 (2026-11-13)：**官方 2.4.4 复扫后整改（SDI-4 重疾声明派生）**：
   - **SDI-4（Excessive Agency，MEDIUM）**：官方原文——
@@ -775,55 +804,6 @@ fallback 三件套 / SKILL.md 引用 / 🔒 默认隐藏），防止后续整改
     不再谎称已满足。
   - **回归**：新增低预算档位 + 对抗场景（产品池全为非多次/非终身重疾）+ 年收入缺失 三类用例。
 
-- v2.4.2 (2026-11-11)：**官方扫描复扫后整改（SDI-4 features 保额同步 + 续保标记顺序无关）**：
-  - **SDI-4（Excessive Agency，MEDIUM）**：官方原文——
-    「The premium plan constructs its medical coverage feature before `_finalize_plan`
-    applies budget-driven coverage reductions. Finalization updates the product coverage
-    and key_benefits but only prunes features for removed insurance types, so a retained
-    medical product can have a lower final coverage amount while its feature still
-    advertises the original amount.」
-    实测复现：预算 8000 档下全面版医疗险被下调到 **100 万**，但 features 仍写「医疗险**400万**保额」。
-    修法：新增 `_sync_features_coverage_claims()` —— 在**出口处**（`_enforce_budget` 完成后）
-    按每个保留险种的**最终保额**重算 features 中的保额表述。
-  - **SDI-4-续保（顺序无关）**：`_renewal_duration_years()` 原为**单轮扫描**，
-    遇到数值型标记即**立即返回** → 数值标记排在 long_term 标记之前时
-    （`['guaranteed_renewable_1年', 'long_term_with_guaranteed_renewable']`）
-    → 错报「1年保证续保」，**结果依赖 notes 排列顺序**。
-    修法：**分两轮扫描** —— 先全表扫 long_term 标记（命中即返回 None），再扫数值型标记。
-  - **恒真检测器修正**：`check(desc, False)` 是失败分支的**合法**断言（原实现误报为恒真），
-    现只把 `check(desc, True)` 计入恒真命中。
-  - ⚠️ **400 电话优先推荐功能零改动**：锁定标记 = 20 / 首选公司 = 10 / 客服电话 = 6
-    （均与基线一致）；本 skill 仍为「联系方式默认隐藏、用户询问后展示」策略
-  - **测试**：155 → **159 项** → 159/159 PASS；连同其余 4 套件共 **393 项全 PASS**
-- v2.4.0 (2026-11-10)：**v2.3.8 官方复扫后整改（SDI-4 保额声明校正 + 长期续保标记 + SQP-1 全局触发词）**：
-  - **官方扫描验证（v2.3.8 已公开）**：`clawhub scan download ai-insurance-advisor --version 2.3.8`
-    → `issueCount` **5 → 1**、`score` **60 → 12**、`severity` **HIGH → LOW**
-    → SQP-3 / TM1×2 / SDI-4（文档↔实现）均已消除 ✅；本版修完**剩余那 1 条**
-  - **SDI-4（Excessive Agency，MEDIUM，99%）**：全面版医疗险**写死「600万高保额」**，
-    保额被 `max_coverage` 夹到 400 万后对外**仍宣称 600 万**（虚报可售保额）；
-    features 中的「医疗险600万保额」也只在「险种是否存在」层面判断，不看保额数值。
-    官方原文：「The promised final reconciliation of coverage claims leaves the premium medical
-    plan's hard-coded "600万高保额" unchanged when actual coverage is reduced.」
-    修法：①`_normalize_coverage_claim()` 正则补齐「数字+万+高保额」与「险种名+数字+万」两种形态；
-    ②features 中的医疗险条目改为由**真实选中产品与实际保额**派生
-    （`医疗险{实际保额//10000}万保额，{coverage_period}，涵盖最新治疗手段`）；
-    ③新增**通用一致性断言**：每个产品的保额数字与其对外声明必须一致。
-    ⚠️ **结构化数值字段零变化**（premium / total_coverage / 各险种 coverage 与改前完全一致），
-    仅**对外文案**由虚报的 600 万改为实际的 400 万。
-  - **SDI-4-续保（Excessive Agency，MEDIUM）**：`_renewal_duration_years()` 只识别数值型保证续保标记，
-    **忽略** `long_term_with_guaranteed_renewable` → 回落到 `duration_value` →
-    把「保险期间 1 年」错报成「1年保证续保」（与该函数 docstring 声明相反）。
-    修法：**先扫 long_term 标记 → 直接返回 None**（长期不按年限计）。
-  - **SQP-1（Trigger Abuse，LOW，90%）**：审计要求保险语境约束覆盖【整个 skill 与每个模块】。
-    修法：①全局触发词表去泛用化；②**全部 9 个模块**的触发词改为保险专用表述
-    （如「话术」→「保险销售话术」「朋友圈文案」→「保险朋友圈文案」）；
-    ③新增**全局触发词作用域声明**（语境不明时**先追问澄清**，不得直接收集财务/家庭信息）。
-  - ⚠️ **400 电话优先推荐功能零改动**：锁定标记 = 20 / 首选公司 = 10 / 客服电话 = 6
-    （均与基线一致）；本 skill 仍为「联系方式默认隐藏、用户询问后展示」策略
-  - **测试**：131 → **150 项**（新增 F6 / F7 / F8 共 19 项）→ 150/150 PASS；
-    连同其余 4 套件共 **384 项全 PASS**
-  - **发布面修正**：`.clawhubignore` 补齐 `*.bak` / `__pycache__` / `.DS_Store` 规则
-    （此前 `premium_calculator.py.bak.*` 与 `__pycache__` 被打进发布产物，发布面 9 个 → **7 个**）
 
 <!-- 历史版本更新日志已归档到 workspace/skills-analysis/archives/skill-changelogs/<skill>-changelog.md
      （保留完整审计历史；此处只留最近 2 个版本，控制 SKILL.md 体积以通过 collection review 限额） -->
