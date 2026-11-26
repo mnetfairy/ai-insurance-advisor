@@ -30,11 +30,10 @@
 #    导致 premium_calculator.py.bak.* 与 __pycache__ 被打进发布产物（发布面 9 个）。
 
 scripts/sanitize_products_json.py
-scripts/test_budget_compliance.py
-scripts/test_data_hygiene.py
-scripts/test_discontinued_filter.py
-scripts/test_insurance_recommendations.py
-scripts/test_audit_remediation.py
+# ⚠ 2026-11-26 修正：原先逐个列举测试脚本 → 新增测试文件会**漏进发布产物**
+#   （实测：scripts/test_exclusion_vocab.py 被打进发布面 → fileCount 8 ≠ 7）。
+#   改为**通配**（与 china 库同口径）→ 今后新增测试文件**自动**被排除。
+scripts/test_*.py
 
 # ---- 临时/工作副本（防御性规则）----
 # 起因（2026-11-14）：本地校验脚本曾把 HEAD 版 plan_designer.py 写成
